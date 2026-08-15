@@ -1,0 +1,391 @@
+<Window x:Class="StockCasterLive.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="StockCaster Live"
+        Width="1140" Height="740"
+        MinWidth="980" MinHeight="660"
+        WindowStartupLocation="CenterScreen"
+        Background="#F3F6FA"
+        FontFamily="Segoe UI"
+        TextOptions.TextFormattingMode="Display">
+    <Window.Resources>
+        <SolidColorBrush x:Key="Text" Color="#162033"/>
+        <SolidColorBrush x:Key="Muted" Color="#748096"/>
+        <SolidColorBrush x:Key="Line" Color="#E3E8F0"/>
+
+        <Style x:Key="Card" TargetType="Border">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="BorderBrush" Value="#E4E9F1"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="14"/>
+            <Setter Property="Padding" Value="18"/>
+            <Setter Property="Effect">
+                <Setter.Value>
+                    <DropShadowEffect BlurRadius="18" ShadowDepth="3" Opacity="0.06" Color="#182230"/>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="Label" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="#3C485C"/>
+            <Setter Property="Margin" Value="0,0,0,7"/>
+        </Style>
+
+        <Style x:Key="Input" TargetType="Control">
+            <Setter Property="Height" Value="34"/>
+            <Setter Property="Padding" Value="11,5"/>
+            <Setter Property="Background" Value="#F9FAFC"/>
+            <Setter Property="BorderBrush" Value="#DCE2EB"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Foreground" Value="{StaticResource Text}"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+
+        <Style x:Key="ButtonBase" TargetType="Button">
+            <Setter Property="Height" Value="34"/>
+            <Setter Property="Padding" Value="14,0"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="ButtonBorder" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="9">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="Opacity" Value="0.88"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="Opacity" Value="0.72"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="ButtonBorder" Property="Opacity" Value="0.42"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SecondaryButton" TargetType="Button" BasedOn="{StaticResource ButtonBase}">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="BorderBrush" Value="#D6DDE8"/>
+            <Setter Property="Foreground" Value="#344054"/>
+        </Style>
+
+        <Style x:Key="PrivacyToggle" TargetType="ToggleButton">
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="Padding" Value="12,0"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="#8A5A00"/>
+            <Setter Property="Background" Value="#FFF8E6"/>
+            <Setter Property="BorderBrush" Value="#F5D489"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="ToggleBorder" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ToggleBorder" Property="BorderBrush" Value="#E8B84E"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter Property="Background" Value="#FFF0C7"/>
+                                <Setter Property="BorderBrush" Value="#F2B632"/>
+                                <Setter Property="Foreground" Value="#714500"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="ToggleBorder" Property="Opacity" Value="0.42"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="StartButton" TargetType="Button" BasedOn="{StaticResource ButtonBase}">
+            <Setter Property="Height" Value="46"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderBrush" Value="#6157F1"/>
+            <Setter Property="Background">
+                <Setter.Value>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                        <GradientStop Color="#635BFF" Offset="0"/>
+                        <GradientStop Color="#8B5CF6" Offset="0.55"/>
+                        <GradientStop Color="#EC4899" Offset="1"/>
+                    </LinearGradientBrush>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="StopButton" TargetType="Button" BasedOn="{StaticResource ButtonBase}">
+            <Setter Property="Height" Value="46"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Foreground" Value="#B4233E"/>
+            <Setter Property="BorderBrush" Value="#FFB8C5"/>
+            <Setter Property="Background" Value="#FFF0F3"/>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="78"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="38"/>
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0">
+            <Border.Background>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                    <GradientStop Color="#171A35" Offset="0"/>
+                    <GradientStop Color="#332C69" Offset="0.56"/>
+                    <GradientStop Color="#5C3775" Offset="1"/>
+                </LinearGradientBrush>
+            </Border.Background>
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="54"/>
+                    <RowDefinition Height="24"/>
+                </Grid.RowDefinitions>
+                <Grid Grid.Row="0" Margin="25,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <Border Width="42" Height="42" CornerRadius="12" Background="#26FFFFFF"
+                                BorderBrush="#38FFFFFF" BorderThickness="1">
+                            <Grid>
+                                <Path Data="M 9,26 L 16,18 L 22,22 L 31,11" Stroke="#7CF6D2" StrokeThickness="3"
+                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
+                                <Ellipse Width="7" Height="7" Fill="#FF7CB3" HorizontalAlignment="Right"
+                                         VerticalAlignment="Top" Margin="0,7,7,0"/>
+                            </Grid>
+                        </Border>
+                        <StackPanel Margin="13,0,0,0" VerticalAlignment="Center">
+                            <TextBlock Text="StockCaster Live" Foreground="White" FontSize="18" FontWeight="Bold"/>
+                            <TextBlock Text="증권 차트를 실시간 방송으로" Foreground="#BFC5DF" FontSize="10.5" Margin="0,1,0,0"/>
+                        </StackPanel>
+                    </StackPanel>
+                    <Border Grid.Column="1" Padding="12,6" CornerRadius="15" Background="#1BFFFFFF"
+                            BorderBrush="#34FFFFFF" BorderThickness="1" VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse x:Name="HeaderStatusDot" Width="8" Height="8" Fill="#7CF6D2" Margin="0,0,7,0"/>
+                            <TextBlock x:Name="HeaderStatusText" Text="방송 준비" Foreground="White" FontSize="11" FontWeight="SemiBold"/>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+                <Border Grid.Row="1" Background="#2A0B1025" BorderBrush="#28FFFFFF" BorderThickness="0,1,0,0"
+                        ClipToBounds="True">
+                    <Grid x:Name="RiskTickerViewport" ClipToBounds="True" SizeChanged="RiskTickerViewport_SizeChanged">
+                        <TextBlock x:Name="RiskNoticeText"
+                                   Text="⚠ 투자위험 고지  |  본 방송의 정보는 투자 참고용이며 투자 권유나 수익을 보장하지 않습니다. 투자 판단과 그에 따른 손익 책임은 투자자 본인에게 있습니다."
+                                   Foreground="#FFE7A6" FontSize="10.5" FontWeight="SemiBold"
+                                   VerticalAlignment="Center" TextWrapping="NoWrap">
+                            <TextBlock.RenderTransform>
+                                <TranslateTransform/>
+                            </TextBlock.RenderTransform>
+                        </TextBlock>
+                    </Grid>
+                </Border>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="1" Margin="20,18,20,14">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="16"/>
+                <ColumnDefinition Width="310"/>
+            </Grid.ColumnDefinitions>
+
+            <Grid Grid.Column="0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="12"/>
+                    <RowDefinition Height="96"/>
+                </Grid.RowDefinitions>
+
+                <Border Style="{StaticResource Card}" Padding="12">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="38"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <Grid Margin="4,0,4,9">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="방송 미리보기" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Text}"/>
+                                <Border x:Name="PreviewBadge" Background="#EEF0FF" CornerRadius="8" Padding="7,3" Margin="9,0,0,0">
+                                    <TextBlock x:Name="PreviewBadgeText" Text="대기" Foreground="#5D57D9" FontSize="10" FontWeight="SemiBold"/>
+                                </Border>
+                            </StackPanel>
+                            <TextBlock Grid.Column="1" x:Name="PreviewInfoText" Text="소스를 선택하세요"
+                                       Foreground="{StaticResource Muted}" FontSize="10.5" VerticalAlignment="Center"/>
+                        </Grid>
+                        <Border Grid.Row="1" Background="#101522" CornerRadius="10" ClipToBounds="True">
+                            <Grid>
+                                <Image x:Name="PreviewImage" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="LowQuality"/>
+                                <Canvas x:Name="PrivacyMaskCanvas" Panel.ZIndex="2" Background="Transparent"
+                                        IsHitTestVisible="False"
+                                        MouseLeftButtonDown="PrivacyMaskCanvas_MouseLeftButtonDown"
+                                        MouseMove="PrivacyMaskCanvas_MouseMove"
+                                        MouseLeftButtonUp="PrivacyMaskCanvas_MouseLeftButtonUp"
+                                        SizeChanged="PrivacyMaskCanvas_SizeChanged"/>
+                                <StackPanel x:Name="PreviewEmptyPanel" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                    <Border Width="66" Height="54" CornerRadius="12" BorderBrush="#536078" BorderThickness="1.5" Background="#172033">
+                                        <Grid>
+                                            <Rectangle Width="33" Height="20" RadiusX="3" Stroke="#77849B" StrokeThickness="2"/>
+                                            <Path Data="M 25,34 L 41,34 M 33,27 L 33,34" Stroke="#77849B" StrokeThickness="2"/>
+                                        </Grid>
+                                    </Border>
+                                    <TextBlock Text="방송할 증권 차트 창을 선택하세요" Foreground="#D4DAE5" FontWeight="SemiBold"
+                                               FontSize="13" Margin="0,14,0,0" HorizontalAlignment="Center"/>
+                                    <TextBlock Text="차트 화면이 이곳에 실시간으로 표시됩니다" Foreground="#748096"
+                                               FontSize="10.5" Margin="0,5,0,0" HorizontalAlignment="Center"/>
+                                </StackPanel>
+                                <Border x:Name="LiveOverlay" Panel.ZIndex="3" Visibility="Collapsed" HorizontalAlignment="Left" VerticalAlignment="Top"
+                                        Margin="14" Background="#D91F2937" CornerRadius="6" Padding="9,5">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Ellipse Width="7" Height="7" Fill="#FF4268" Margin="0,0,6,0"/>
+                                        <TextBlock Text="LIVE" Foreground="White" FontWeight="Bold" FontSize="10"/>
+                                        <TextBlock x:Name="ElapsedText" Text="00:00:00" Foreground="#E4E7EC" FontSize="10" Margin="8,0,0,0"/>
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </Border>
+
+                <Border Grid.Row="2" Style="{StaticResource Card}" Padding="16,13">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="150"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center">
+                            <StackPanel Orientation="Horizontal">
+                                <Ellipse x:Name="StatusDot" Width="9" Height="9" Fill="#28C76F" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                <TextBlock x:Name="StatusText" Text="방송할 창과 서버 정보를 설정해 주세요" FontWeight="SemiBold"
+                                           Foreground="{StaticResource Text}" FontSize="12.5" VerticalAlignment="Center"/>
+                            </StackPanel>
+                            <TextBlock x:Name="StatusDetailText" Text="선택한 화면은 방송 시작 전에 미리 확인할 수 있습니다."
+                                       Foreground="{StaticResource Muted}" FontSize="10.5" Margin="17,6,0,0"/>
+                        </StackPanel>
+                        <Button Grid.Column="1" x:Name="SaveSettingsButton" Content="설정 저장" Style="{StaticResource SecondaryButton}"
+                                VerticalAlignment="Center" Click="SaveSettingsButton_Click"/>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <Border Grid.Column="2" Style="{StaticResource Card}" Padding="18,14">
+                <StackPanel>
+                        <TextBlock Text="방송 설정" FontSize="16" FontWeight="Bold" Foreground="{StaticResource Text}"/>
+                        <TextBlock Text="차트 화면과 송출 정보를 설정합니다" FontSize="10.5" Foreground="{StaticResource Muted}" Margin="0,3,0,12"/>
+
+                        <TextBlock Text="방송할 차트 화면" Style="{StaticResource Label}"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="38"/>
+                                <ColumnDefinition Width="72"/>
+                            </Grid.ColumnDefinitions>
+                            <ComboBox x:Name="WindowCombo" Style="{StaticResource Input}" DisplayMemberPath="DisplayName"
+                                      SelectionChanged="WindowCombo_SelectionChanged" Margin="0,0,7,0"/>
+                            <Button Grid.Column="1" Content="↻" FontSize="17" Padding="0" Margin="0,0,5,0"
+                                    Style="{StaticResource SecondaryButton}" Click="RefreshWindowsButton_Click"/>
+                            <Button Grid.Column="2" x:Name="SelectRegionButton" Content="영역 지정" Padding="6,0"
+                                    Style="{StaticResource SecondaryButton}" Click="SelectRegionButton_Click"/>
+                        </Grid>
+
+                        <Grid Margin="0,7,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="74"/>
+                            </Grid.ColumnDefinitions>
+                            <ToggleButton x:Name="PrivacyMaskToggle" Content="▦ 민감정보 모자이크" Style="{StaticResource PrivacyToggle}"
+                                          Margin="0,0,7,0" Checked="PrivacyMaskToggle_Checked" Unchecked="PrivacyMaskToggle_Unchecked"/>
+                            <Button Grid.Column="1" x:Name="ClearPrivacyMasksButton" Content="전체 삭제"
+                                    Style="{StaticResource SecondaryButton}" Height="32" Padding="6,0"
+                                    Click="ClearPrivacyMasksButton_Click"/>
+                        </Grid>
+
+                        <Separator Background="{StaticResource Line}" Margin="0,8,0,7"/>
+
+                        <TextBlock Text="영상 품질" Style="{StaticResource Label}"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="8"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <ComboBox x:Name="ResolutionCombo" Style="{StaticResource Input}" SelectedIndex="1">
+                                <ComboBoxItem Content="720p (용량 절약)" Tag="720"/>
+                                <ComboBoxItem Content="1080p (선명 · 권장)" Tag="1080"/>
+                            </ComboBox>
+                            <ComboBox Grid.Column="2" x:Name="FrameRateCombo" Style="{StaticResource Input}" SelectedIndex="0">
+                                <ComboBoxItem Content="30 fps" Tag="30"/>
+                                <ComboBoxItem Content="60 fps" Tag="60"/>
+                            </ComboBox>
+                        </Grid>
+
+                        <TextBlock Text="마이크" Style="{StaticResource Label}" Margin="0,9,0,6"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="38"/>
+                            </Grid.ColumnDefinitions>
+                            <CheckBox x:Name="UseMicCheck" IsChecked="True" VerticalAlignment="Center" Margin="0,0,9,0"
+                                      Checked="UseMicCheck_Changed" Unchecked="UseMicCheck_Changed"/>
+                            <ComboBox Grid.Column="1" x:Name="AudioDeviceCombo" Style="{StaticResource Input}" DisplayMemberPath="DisplayName"
+                                      Margin="0,0,7,0"/>
+                            <Button Grid.Column="2" Content="↻" FontSize="17" Style="{StaticResource SecondaryButton}" Padding="0"
+                                    Click="RefreshAudioButton_Click"/>
+                        </Grid>
+
+                        <Separator Background="{StaticResource Line}" Margin="0,8,0,7"/>
+
+                        <TextBlock Text="RTMP 서버 주소" Style="{StaticResource Label}"/>
+                        <TextBox x:Name="ServerUrlBox" Style="{StaticResource Input}" Text="rtmp://"/>
+                        <TextBlock Text="스트림 키" Style="{StaticResource Label}" Margin="0,8,0,6"/>
+                        <PasswordBox x:Name="StreamKeyBox" Style="{StaticResource Input}"/>
+                        <TextBlock Text="스트림 키는 화면에 표시하거나 로그에 남기지 않습니다."
+                                   Foreground="#8A94A6" FontSize="9.5" Margin="1,4,0,0"/>
+
+                        <CheckBox x:Name="RememberKeyCheck" Content="이 PC에 스트림 키 저장" IsChecked="False"
+                                  Foreground="#566176" FontSize="10.5" Margin="1,8,0,0"/>
+
+                        <Grid Margin="0,12,0,0">
+                            <Button x:Name="StartButton" Content="●  방송 시작" Style="{StaticResource StartButton}" Click="StartButton_Click"/>
+                            <Button x:Name="StopButton" Content="■  방송 종료" Style="{StaticResource StopButton}" Visibility="Collapsed"
+                                    Click="StopButton_Click"/>
+                        </Grid>
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <Grid Grid.Row="2" Margin="22,0">
+            <TextBlock Text="StockCaster Live 0.2 · 에드가씨에스트" Foreground="#8893A6" FontSize="10" VerticalAlignment="Center"/>
+            <TextBlock Text="문의 010-8447-9973" Foreground="#8893A6" FontSize="10" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+        </Grid>
+    </Grid>
+</Window>

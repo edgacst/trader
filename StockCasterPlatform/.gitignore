@@ -1,0 +1,6 @@
+StockCasterPlatform/bin/
+StockCasterPlatform/obj/
+StockCasterPlatform/MediaServer/*.zip
+StockCasterPlatform/App_Data/
+artifacts/
+dist/

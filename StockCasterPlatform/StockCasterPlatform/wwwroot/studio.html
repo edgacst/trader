@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StockCaster 운영 콘솔</title>
+  <link rel="stylesheet" href="/styles.css?v=20260815.2" onerror="setTimeout(() => { this.href = '/styles.css?v=20260815.2&amp;retry=' + Date.now(); }, 1200)">
+  <script defer src="/studio.js"></script>
+</head>
+<body class="studio-body">
+  <header class="site-header studio-header">
+    <a class="brand" href="/studio">
+      <span class="brand-mark"><span class="chart-line"></span></span>
+      <span><strong>StockCaster 운영 콘솔</strong><small>LOCAL MVP SERVER</small></span>
+    </a>
+    <div class="header-actions">
+      <a class="viewer-link" href="/replays" target="_blank" rel="noopener">다시보기 관리 확인 ↗</a>
+      <a class="viewer-link" href="/admin">회원·채팅 관리</a>
+      <a class="viewer-link" href="/live" target="_blank" rel="noopener">회원 시청 화면 열기 ↗</a>
+    </div>
+  </header>
+
+  <main class="studio-shell">
+    <section class="studio-hero">
+      <div>
+        <div class="eyebrow">방송 운영 센터</div>
+        <h1>송출 및 방송 관리</h1>
+        <p>방송 안내를 설정하고 StockCaster Live 연결 상태를 실시간으로 확인합니다.</p>
+      </div>
+      <span id="serverBadge" class="server-badge starting"><i></i><span>서버 확인 중</span></span>
+    </section>
+
+    <section class="broadcast-settings-card">
+      <div class="console-heading">
+        <div><h2>방송 안내 설정</h2><span>저장 즉시 회원 시청 화면에 반영됩니다</span></div>
+        <span id="broadcastInfoSavedAt">정보 불러오는 중</span>
+      </div>
+      <form id="broadcastInfoForm" class="broadcast-info-form">
+        <label class="broadcast-title-field"><span>방송 제목</span><input id="broadcastTitleInput" maxlength="80" required placeholder="예: 장중 실시간 시장 분석"></label>
+        <label><span>방송 예정 시간</span><input id="broadcastScheduleInput" type="datetime-local"></label>
+        <label class="broadcast-wide-field"><span>방송 설명</span><textarea id="broadcastDescriptionInput" maxlength="240" rows="2" placeholder="회원 화면에 표시할 방송 설명"></textarea></label>
+        <label class="broadcast-wide-field"><span>고정 공지</span><textarea id="broadcastNoticeInput" maxlength="160" rows="2" placeholder="비워두면 공지가 표시되지 않습니다"></textarea></label>
+        <div class="broadcast-form-actions">
+          <span id="broadcastInfoError" class="form-error hidden" role="alert"></span>
+          <button id="clearScheduleButton" class="small-refresh" type="button">일정 지우기</button>
+          <button id="saveBroadcastInfoButton" class="primary-button compact" type="submit">방송 안내 저장</button>
+        </div>
+      </form>
+    </section>
+
+    <div class="studio-grid">
+      <section class="connection-card">
+        <div class="console-heading">
+          <h2>StockCaster Live 설정</h2>
+          <span>로컬 시험 송출</span>
+        </div>
+        <label class="connection-field">
+          <span>RTMP 서버 주소</span>
+          <div><input id="rtmpUrl" readonly value="불러오는 중..."><button data-copy="rtmpUrl">복사</button></div>
+        </label>
+        <label class="connection-field">
+          <span>보호된 스트림 키</span>
+          <div class="protected-key-field"><input id="streamKey" type="password" readonly value="불러오는 중..."><button id="toggleStreamKey" type="button">보기</button><button data-copy="streamKey">복사</button></div>
+        </label>
+        <div id="studioAuthNotice" class="local-warning">이 키가 없는 송출 연결은 서버에서 차단됩니다. 키를 다른 사람에게 공개하지 마세요.</div>
+      </section>
+
+      <section class="server-state-card">
+        <div class="console-heading">
+          <div><h2>실시간 송출 모니터</h2><span>2.5초마다 자동 갱신</span></div>
+          <button id="refreshStatus" class="small-refresh" type="button">새로고침</button>
+        </div>
+        <div class="state-display">
+          <div class="state-orb" id="stateOrb"><i></i></div>
+          <div class="state-copy"><span id="streamHealthBadge" class="stream-health offline">오프라인</span><strong id="stateTitle">방송 대기</strong><span id="stateDescription">송출 프로그램 연결을 기다리고 있습니다.</span></div>
+        </div>
+        <dl class="server-details monitor-details">
+          <div><dt>시청자 연결</dt><dd id="studioViewerCount">0명</dd></div>
+          <div><dt>방송 시간</dt><dd id="streamUptime">00:00:00</dd></div>
+          <div><dt>수신 속도</dt><dd id="inboundBitrate">-</dd></div>
+          <div><dt>수신 데이터</dt><dd id="inboundData">0 B</dd></div>
+          <div><dt>영상</dt><dd id="videoFormat">-</dd></div>
+          <div><dt>오디오</dt><dd id="audioFormat">-</dd></div>
+          <div><dt>오류 프레임</dt><dd id="inboundErrors">0</dd></div>
+          <div><dt>자동 녹화</dt><dd id="recordingStatus">대기</dd></div>
+        </dl>
+      </section>
+    </div>
+
+    <section class="steps-card">
+      <div class="console-heading"><h2>방송 시작 순서</h2><span>약 1분</span></div>
+      <ol class="setup-steps">
+        <li><b>1</b><div><strong>StockCaster Live 실행</strong><span>방송할 차트 화면과 마이크를 선택합니다.</span></div></li>
+        <li><b>2</b><div><strong>위 연결 정보 입력</strong><span>RTMP 서버 주소와 스트림 키를 각각 붙여 넣습니다.</span></div></li>
+        <li><b>3</b><div><strong>방송 시작</strong><span>송출 연결 후 이 화면의 상태가 LIVE로 변경됩니다.</span></div></li>
+        <li><b>4</b><div><strong>회원 화면 확인</strong><span>시청 화면을 열면 영상이 자동 재생됩니다.</span></div></li>
+      </ol>
+    </section>
+  </main>
+
+  <div id="copyToast" class="copy-toast">복사했습니다</div>
+</body>
+</html>

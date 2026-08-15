@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#15152f">
+  <title>StockCaster 다시보기</title>
+  <link rel="stylesheet" href="/styles.css?v=20260815.2" onerror="setTimeout(() => { this.href = '/styles.css?v=20260815.2&amp;retry=' + Date.now(); }, 1200)">
+  <script defer src="/ticker.js"></script>
+  <script defer src="/replays.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="/" aria-label="StockCaster 홈">
+      <span class="brand-mark"><span class="chart-line"></span></span>
+      <span><strong>StockCaster</strong><small>LIVE MARKET</small></span>
+    </a>
+    <nav class="top-nav" aria-label="주요 메뉴">
+      <a href="/live">라이브</a>
+      <a href="/#broadcastSchedule">방송 일정</a>
+      <a class="active" href="/replays">다시보기</a>
+    </nav>
+    <button id="replayMemberButton" class="member-button" type="button">로그인 · 회원가입</button>
+  </header>
+
+  <div class="risk-ticker" role="note" aria-label="주요 공지">
+    <div class="ticker-track"></div>
+  </div>
+
+  <main class="replay-shell">
+    <section class="replay-hero">
+      <div>
+        <div class="eyebrow">STOCKCASTER ARCHIVE</div>
+        <h1>방송 다시보기</h1>
+        <p>지난 라이브 차트 분석 방송을 원하는 시간에 다시 시청하세요.</p>
+      </div>
+      <span id="replayCountBadge" class="archive-count">영상 0개</span>
+    </section>
+
+    <section id="replayGrid" class="replay-grid" aria-live="polite"></section>
+    <section id="replayEmpty" class="replay-empty hidden">
+      <div class="signal-icon"><i></i><i></i><i></i></div>
+      <h2>아직 등록된 다시보기가 없습니다</h2>
+      <p>방송을 종료하면 녹화 영상이 이곳에 자동으로 추가됩니다.</p>
+      <a href="/live">라이브 방송으로 돌아가기</a>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <span>StockCaster Platform 0.9 · 에드가씨에스트</span>
+    <span>문의 010-8447-9973</span>
+  </footer>
+
+  <div id="replayPlayerModal" class="modal-backdrop hidden" aria-hidden="true">
+    <section class="replay-player-modal" role="dialog" aria-modal="true" aria-labelledby="replayPlayerTitle">
+      <div class="replay-player-heading">
+        <div><div class="eyebrow">REPLAY</div><h2 id="replayPlayerTitle">다시보기</h2><p id="replayPlayerMeta"></p></div>
+        <button id="replayPlayerClose" class="modal-close static" type="button" aria-label="닫기">×</button>
+      </div>
+      <video id="replayVideo" controls playsinline preload="metadata"></video>
+      <div id="replayPlayerError" class="player-error hidden"></div>
+    </section>
+  </div>
+
+  <div id="replayAuthModal" class="modal-backdrop hidden" aria-hidden="true">
+    <section class="auth-modal" role="dialog" aria-modal="true" aria-labelledby="replayAuthTitle">
+      <button id="replayAuthClose" class="modal-close" type="button" aria-label="닫기">×</button>
+      <div id="replayLoginPanel">
+        <div class="eyebrow">MEMBER ONLY</div>
+        <h2 id="replayAuthTitle">회원 로그인</h2>
+        <p class="auth-description">다시보기 재생은 프리미엄 회원에게 제공됩니다.</p>
+        <form id="replayLoginForm" class="auth-form">
+          <label><span>아이디</span><input id="replayUsername" required autocomplete="username"></label>
+          <label><span>비밀번호</span><input id="replayPassword" type="password" required autocomplete="current-password"></label>
+          <button class="primary-button" type="submit">로그인하고 재생</button>
+        </form>
+        <div id="replayAuthError" class="form-error hidden"></div>
+        <a class="register-guide" href="/">회원가입하고 라이브 방송 시작하기</a>
+      </div>
+      <div id="replayAccountPanel" class="account-panel hidden">
+        <div id="replayAccountAvatar" class="account-avatar">SC</div>
+        <h2 id="replayAccountName">회원</h2>
+        <p id="replayAccountUsername">@member</p>
+        <div id="replayAccountTier" class="account-tier">회원 등급</div>
+        <div id="replayAccessNotice" class="access-notice hidden">다시보기는 프리미엄 회원에게 제공됩니다. 운영자에게 등급 변경을 요청해 주세요.</div>
+        <button id="replayLogoutButton" class="secondary-button" type="button">로그아웃</button>
+      </div>
+    </section>
+  </div>
+</body>
+</html>

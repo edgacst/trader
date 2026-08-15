@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#15152f">
+  <title>StockCaster Live 방송</title>
+  <link rel="stylesheet" href="/styles.css?v=20260815.2" onerror="setTimeout(() => { this.href = '/styles.css?v=20260815.2&amp;retry=' + Date.now(); }, 1200)">
+  <script defer src="/lib/hls.min.js"></script>
+  <script defer src="/ticker.js"></script>
+  <script defer src="/webrtc-player.js"></script>
+  <script defer src="/app.js"></script>
+  <script defer src="/member-chat.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="/" aria-label="StockCaster 홈">
+      <span class="brand-mark" aria-hidden="true">
+        <span class="chart-line"></span>
+      </span>
+      <span>
+        <strong>StockCaster</strong>
+        <small>LIVE MARKET</small>
+      </span>
+    </a>
+    <nav class="top-nav" aria-label="주요 메뉴">
+      <a class="active" href="/live">라이브</a>
+      <a href="#broadcastSchedule">방송 일정</a>
+      <a href="/replays">다시보기</a>
+    </nav>
+    <button id="memberButton" class="member-button" type="button">로그인 · 회원가입</button>
+  </header>
+
+  <div class="risk-ticker" role="note" aria-label="주요 공지">
+    <div class="ticker-track"></div>
+  </div>
+
+  <main class="page-shell">
+    <section class="content-column">
+      <article class="broadcast-card">
+        <div class="broadcast-heading">
+          <div>
+            <div class="eyebrow">현재 방송중 종목</div>
+            <h1 id="broadcastTitle">실시간 증권 차트 방송</h1>
+          </div>
+          <div class="broadcast-meta">
+            <button id="theaterButton" class="view-mode-button" type="button" aria-pressed="false">▣ 초대형 화면</button>
+            <span id="liveBadge" class="status-badge offline"><i></i><span>방송 대기</span></span>
+            <span class="viewer-count" title="현재 시청자 수">◉ <b id="viewerCount">0</b>명</span>
+          </div>
+        </div>
+
+        <div id="broadcastNotice" class="broadcast-notice hidden" role="status"><b>공지</b><span id="broadcastNoticeText"></span></div>
+
+        <div class="video-stage" id="videoStage">
+          <video id="liveVideo" controls muted autoplay playsinline></video>
+          <div class="video-overlay" id="videoOverlay">
+            <div class="signal-icon" aria-hidden="true"><i></i><i></i><i></i></div>
+            <h2 id="overlayTitle">방송을 준비하고 있습니다</h2>
+            <p id="overlayMessage">방송이 시작되면 영상이 자동으로 재생됩니다.</p>
+            <button id="retryButton" class="retry-button" type="button">방송 상태 확인</button>
+          </div>
+          <div class="connecting-pill" id="connectingPill"><i></i> 영상 연결 중</div>
+          <button id="fullscreenButton" class="fullscreen-button" type="button" title="브라우저 전체화면" aria-label="브라우저 전체화면">⛶</button>
+        </div>
+
+        <div class="broadcast-footer">
+          <div class="host-avatar">SC</div>
+          <div class="host-copy">
+            <strong>StockCaster 전문가 방송</strong>
+            <span id="broadcastDescription">실시간 차트 분석과 시장 흐름을 전달합니다.</span>
+          </div>
+          <button class="follow-button" type="button" disabled>알림 받기 준비 중</button>
+        </div>
+      </article>
+
+      <section class="info-card">
+        <h2>방송 안내</h2>
+        <div class="info-grid">
+          <div><span>방송 상태</span><strong id="detailStatus">방송 대기</strong></div>
+          <div><span>영상 품질</span><strong id="qualityText">자동</strong></div>
+          <div><span>회원 기능</span><strong>무료 라이브 · 프리미엄 다시보기</strong></div>
+        </div>
+        <p>시청 환경에 따라 영상 시작까지 몇 초가 걸릴 수 있습니다. 방송이 끊기면 자동으로 다시 연결합니다.</p>
+      </section>
+    </section>
+
+    <aside class="side-column">
+      <section class="chat-card">
+        <div class="panel-heading">
+          <div>
+            <h2>실시간 채팅</h2>
+            <span>방송을 보며 함께 이야기하세요</span>
+          </div>
+          <span id="chatConnectionBadge" class="coming-badge">로그인 필요</span>
+        </div>
+        <div id="chatPinnedNotice" class="chat-pinned-notice hidden"><b>관리자 공지</b><span id="chatPinnedNoticeText"></span></div>
+        <div id="chatLoggedOut" class="chat-empty">
+          <div class="chat-bubbles" aria-hidden="true"><i></i><i></i></div>
+          <strong>회원들과 실시간으로 이야기하세요</strong>
+          <p>로그인하면 방송을 보며<br>실시간 채팅에 참여할 수 있습니다.</p>
+          <button id="chatLoginButton" class="chat-login-button" type="button">로그인하기</button>
+        </div>
+        <div id="chatLive" class="chat-live hidden">
+          <div id="chatMessages" class="chat-messages" aria-live="polite"></div>
+          <div id="chatNotice" class="chat-notice hidden"></div>
+        </div>
+        <form id="chatForm" class="chat-input-preview hidden">
+          <input id="chatInput" type="text" maxlength="300" autocomplete="off" placeholder="메시지를 입력하세요">
+          <button id="chatSendButton" type="submit">전송</button>
+        </form>
+        <div class="chat-policy">서로를 존중하는 대화 문화를 지켜 주세요.</div>
+      </section>
+
+      <section id="broadcastSchedule" class="schedule-card">
+        <div class="panel-heading compact">
+          <div><h2>방송 일정</h2><span id="scheduleCaption">예정된 라이브</span></div>
+        </div>
+        <div class="schedule-item">
+          <time id="scheduleTime">일정 미정</time>
+          <div><strong id="scheduleTitle">실시간 증권 차트 방송</strong><span id="scheduleDescription">방송 시작 시 자동 연결</span></div>
+        </div>
+      </section>
+    </aside>
+  </main>
+
+  <footer class="site-footer">
+    <span>StockCaster Platform 0.8 · 에드가씨에스트</span>
+    <span>문의 010-8447-9973</span>
+  </footer>
+
+  <div id="authModal" class="modal-backdrop hidden" aria-hidden="true">
+    <section class="auth-modal" role="dialog" aria-modal="true" aria-labelledby="authTitle">
+      <button id="authCloseButton" class="modal-close" type="button" aria-label="닫기">×</button>
+
+      <div id="authForms">
+        <div class="eyebrow">STOCKCASTER MEMBER</div>
+        <h2 id="authTitle">회원 로그인</h2>
+        <p class="auth-description">무료회원도 라이브 시청과 실시간 채팅에 참여할 수 있습니다.</p>
+        <div class="auth-tabs">
+          <button class="active" type="button" data-auth-tab="login">로그인</button>
+          <button type="button" data-auth-tab="register">회원가입</button>
+        </div>
+
+        <form id="loginForm" class="auth-form">
+          <label><span>아이디</span><input id="loginUsername" required autocomplete="username" placeholder="아이디"></label>
+          <label><span>비밀번호</span><input id="loginPassword" type="password" required autocomplete="current-password" placeholder="비밀번호"></label>
+          <button class="primary-button" type="submit">로그인</button>
+        </form>
+
+        <form id="registerForm" class="auth-form hidden">
+          <label><span>아이디</span><input id="registerUsername" required minlength="4" maxlength="20" autocomplete="username" placeholder="영문 소문자·숫자 4~20자"></label>
+          <label><span>닉네임</span><input id="registerDisplayName" required minlength="2" maxlength="20" autocomplete="nickname" placeholder="채팅에 표시할 이름"></label>
+          <label><span>비밀번호</span><input id="registerPassword" type="password" required minlength="8" autocomplete="new-password" placeholder="영문·숫자 포함 8자 이상"></label>
+          <button class="primary-button" type="submit">가입하고 시작하기</button>
+        </form>
+        <div id="authError" class="form-error hidden" role="alert"></div>
+      </div>
+
+      <div id="accountPanel" class="account-panel hidden">
+        <div id="accountAvatar" class="account-avatar">SC</div>
+        <h2 id="accountName">회원</h2>
+        <p id="accountUsername">@member</p>
+        <div id="accountTier" class="account-tier">무료 회원 · 라이브 시청</div>
+        <a id="adminLink" class="admin-link hidden" href="/admin">관리자 페이지 열기</a>
+        <button id="logoutButton" class="secondary-button" type="button">로그아웃</button>
+      </div>
+    </section>
+  </div>
+</body>
+</html>

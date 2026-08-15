@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#15152f">
+  <title>StockCaster 회원·채팅 관리</title>
+  <link rel="stylesheet" href="/styles.css?v=20260815.2" onerror="setTimeout(() => { this.href = '/styles.css?v=20260815.2&amp;retry=' + Date.now(); }, 1200)">
+  <script defer src="/admin.js"></script>
+</head>
+<body class="studio-body admin-body">
+  <header class="site-header studio-header">
+    <a class="brand" href="/admin">
+      <span class="brand-mark"><span class="chart-line"></span></span>
+      <span><strong>StockCaster 관리자</strong><small>MEMBER &amp; CHAT</small></span>
+    </a>
+    <div class="header-actions">
+      <a class="viewer-link" href="/studio">송출 운영</a>
+      <a class="viewer-link" href="/live" target="_blank" rel="noopener">회원 화면 ↗</a>
+    </div>
+  </header>
+
+  <main class="admin-shell">
+    <section id="adminLoginCard" class="admin-login-card">
+      <div class="eyebrow">ADMIN ACCESS</div>
+      <h1>운영자 로그인</h1>
+      <p>회원과 실시간 채팅을 관리하려면 운영자 계정으로 로그인하세요.</p>
+      <form id="adminLoginForm" class="auth-form admin-login-form">
+        <label><span>운영자 아이디</span><input id="adminUsername" required autocomplete="username" value="admin"></label>
+        <label><span>비밀번호</span><input id="adminPassword" type="password" required autocomplete="current-password"></label>
+        <button class="primary-button" type="submit">관리 화면 열기</button>
+      </form>
+      <div id="adminLoginError" class="form-error hidden"></div>
+    </section>
+
+    <section id="adminDashboard" class="hidden">
+      <div class="admin-hero">
+        <div>
+          <div class="eyebrow">실시간 서비스 관리</div>
+          <h1>회원 · 채팅 관리</h1>
+          <p>채팅 참여 상태를 확인하고 부적절한 메시지나 회원을 관리합니다.</p>
+        </div>
+        <div class="admin-toolbar">
+          <span id="adminIdentity" class="admin-identity">운영자</span>
+          <button id="adminRefreshButton" class="small-refresh" type="button">새로고침</button>
+          <button id="adminLogoutButton" class="small-refresh danger" type="button">로그아웃</button>
+        </div>
+      </div>
+
+      <div class="admin-stats six">
+        <article><span>전체 회원</span><strong id="memberStat">0</strong><i>명</i></article>
+        <article><span>프리미엄</span><strong id="premiumStat">0</strong><i>명</i></article>
+        <article><span>채팅 접속</span><strong id="onlineStat">0</strong><i>명</i></article>
+        <article><span>저장 메시지</span><strong id="messageStat">0</strong><i>개</i></article>
+        <article><span>채팅 제한</span><strong id="mutedStat">0</strong><i>명</i></article>
+        <article><span>다시보기</span><strong id="replayStat">0</strong><i>개</i></article>
+      </div>
+
+      <section class="admin-card ticker-admin-card">
+        <div class="console-heading">
+          <div><h2>스크롤 공지 관리</h2><span>랜딩·라이브·다시보기 상단에 실시간으로 표시됩니다</span></div>
+          <span id="tickerMessageCount">0 / 20개</span>
+        </div>
+        <form id="tickerMessageForm" class="ticker-admin-form">
+          <label><span>새 스크롤 문구</span><input id="tickerMessageInput" maxlength="180" required placeholder="예: 오늘 방송은 오후 8시에 시작합니다"></label>
+          <button id="addTickerMessageButton" class="replay-save-button" type="submit">공지 등록</button>
+          <div id="tickerMessageError" class="form-error hidden" role="alert"></div>
+        </form>
+        <div id="tickerMessageList" class="ticker-admin-list"></div>
+      </section>
+
+      <section class="admin-card chat-policy-admin-card">
+        <div class="console-heading">
+          <div><h2>채팅 운영정책</h2><span>고정공지·슬로우 모드·금칙어를 실시간으로 적용합니다</span></div>
+          <span id="chatPolicySavedAt">정책 불러오는 중</span>
+        </div>
+        <form id="chatPolicyForm" class="chat-policy-form">
+          <label class="chat-policy-notice"><span>관리자 고정공지</span><textarea id="chatPinnedNoticeInput" maxlength="160" rows="3" placeholder="비워두면 회원 채팅창에서 숨겨집니다"></textarea></label>
+          <label class="chat-policy-words"><span>금칙어</span><textarea id="chatBlockedWordsInput" rows="3" placeholder="쉼표 또는 줄바꿈으로 구분 · 회원에게 공개되지 않음"></textarea></label>
+          <label class="chat-policy-slow"><span>슬로우 모드</span><select id="chatSlowModeSelect">
+            <option value="0">사용 안 함</option>
+            <option value="3">3초</option>
+            <option value="5">5초</option>
+            <option value="10">10초</option>
+            <option value="30">30초</option>
+            <option value="60">60초</option>
+          </select></label>
+          <div class="chat-policy-actions">
+            <span id="chatPolicyError" class="form-error hidden" role="alert"></span>
+            <span class="policy-protection-note">기본 도배 방지: 10초에 최대 5개 · 동일 메시지 반복 차단</span>
+            <button id="saveChatPolicyButton" class="replay-save-button" type="submit">정책 저장</button>
+          </div>
+        </form>
+      </section>
+
+      <div class="admin-grid">
+        <section class="admin-card">
+          <div class="console-heading">
+            <div><h2>회원 관리</h2><span>무료·프리미엄 등급과 채팅 권한 설정</span></div>
+          </div>
+          <div id="memberList" class="member-list"></div>
+        </section>
+
+        <section class="admin-card">
+          <div class="console-heading">
+            <div><h2>최근 채팅</h2><span>최근 300개까지 보관</span></div>
+          </div>
+          <div id="adminMessageList" class="admin-message-list"></div>
+        </section>
+      </div>
+      <section class="admin-card admin-security-card">
+        <div class="console-heading">
+          <div><h2>보안 설정</h2><span>운영자 비밀번호와 RTMP 송출 보안키를 관리합니다</span></div>
+        </div>
+        <div class="security-settings-grid">
+          <form id="adminPasswordForm" class="security-panel">
+            <div class="security-panel-title"><strong>운영자 비밀번호</strong><span>현재 비밀번호 확인 후 변경</span></div>
+            <label><span>현재 비밀번호</span><input id="currentAdminPassword" type="password" required autocomplete="current-password"></label>
+            <label><span>새 비밀번호</span><input id="newAdminPassword" type="password" required minlength="8" autocomplete="new-password" placeholder="영문·숫자 포함 8자 이상"></label>
+            <label><span>새 비밀번호 확인</span><input id="confirmAdminPassword" type="password" required minlength="8" autocomplete="new-password"></label>
+            <button class="replay-save-button security-submit" type="submit">비밀번호 변경</button>
+            <div id="adminPasswordError" class="form-error hidden"></div>
+          </form>
+          <div class="security-panel">
+            <div class="security-panel-title"><strong>RTMP 송출 보안키</strong><span>StockCaster Live 전용 게시 인증</span></div>
+            <label><span>보호된 스트림 키</span></label>
+            <div class="secret-field">
+              <input id="adminStreamKey" type="password" readonly value="불러오는 중...">
+              <button id="toggleAdminStreamKey" type="button">보기</button>
+              <button id="copyAdminStreamKey" type="button">복사</button>
+            </div>
+            <p class="security-help">보안키를 재발급하면 이전 키로는 새 방송을 시작할 수 없습니다. 새 키를 StockCaster Live에 다시 저장해 주세요.</p>
+            <button id="rotateBroadcastKey" class="rotate-key-button" type="button">새 보안키 발급</button>
+          </div>
+        </div>
+      </section>
+      <section class="admin-card admin-replay-card">
+        <div class="console-heading">
+          <div><h2>다시보기 관리</h2><span>제목과 회원 공개 여부를 설정합니다</span></div>
+          <a class="small-refresh admin-preview-link" href="/replays" target="_blank" rel="noopener">회원 페이지 ↗</a>
+        </div>
+        <div id="adminReplayList" class="admin-replay-list"></div>
+      </section>
+      <div id="adminToast" class="copy-toast">처리했습니다</div>
+    </section>
+  </main>
+</body>
+</html>

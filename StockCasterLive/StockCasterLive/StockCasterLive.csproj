@@ -1,0 +1,29 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>StockCasterLive</AssemblyName>
+    <RootNamespace>StockCasterLive</RootNamespace>
+    <Version>0.2.0</Version>
+    <AssemblyVersion>0.2.0.0</AssemblyVersion>
+    <FileVersion>0.2.0.0</FileVersion>
+    <Product>StockCaster Live</Product>
+    <Company>에드가씨에스트</Company>
+    <Authors>에드가씨에스트</Authors>
+    <Description>증권 차트 실시간 방송 송출 프로그램 · 문의 010-8447-9973</Description>
+    <Copyright>Copyright © 2026 에드가씨에스트</Copyright>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="ffmpeg\ffmpeg.exe" Condition="Exists('ffmpeg\ffmpeg.exe')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <TargetPath>ffmpeg\ffmpeg.exe</TargetPath>
+    </Content>
+  </ItemGroup>
+
+</Project>

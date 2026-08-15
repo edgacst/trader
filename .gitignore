@@ -1,0 +1,37 @@
+# 기존 화면 녹화 프로젝트와 로컬 빌드 산출물
+/ScreenCaster/
+/artifacts/
+**/bin/
+**/obj/
+**/artifacts/
+**/dist/
+**/.vs/
+**/*.user
+**/*.suo
+
+# 실행 중 생성되는 데이터와 녹화 파일
+**/App_Data/
+**/logs/
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/*.sqlite
+**/*.sqlite3
+**/*.mp4
+**/*.mkv
+**/*.webm
+
+# 외부 실행 파일(README의 설치 안내에 따라 별도 준비)
+/StockCasterLive/StockCasterLive/ffmpeg/
+/StockCasterPlatform/StockCasterPlatform/MediaServer/mediamtx.exe
+/StockCasterPlatform/StockCasterPlatform/MediaServer/mediamtx_*.zip
+
+# 로컬 비밀정보와 인증서
+.env
+.env.*
+!.env.example
+*.pfx
+*.p12
+*.pem
+*.key
+*.log

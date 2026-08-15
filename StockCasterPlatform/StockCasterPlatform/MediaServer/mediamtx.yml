@@ -1,0 +1,98 @@
+###############################################
+# StockCaster Platform - local media server
+# MediaMTX v1.20.0
+
+logLevel: info
+logDestinations: [stdout]
+logStructured: false
+
+# Only StockCaster Live with the generated credentials can publish to /live.
+# The placeholder password is replaced from SQLite through environment variables.
+authMethod: internal
+authInternalUsers:
+  - user: stockcaster
+    pass: sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+    ips: []
+    permissions:
+      - action: publish
+        path: live
+      - action: publish
+        path: live-webrtc
+  - user: any
+    pass:
+    ips: []
+    permissions:
+      - action: read
+        path: live
+      - action: read
+        path: live-webrtc
+      - action: playback
+        path: live
+  - user: any
+    pass:
+    ips: [127.0.0.1, "::1"]
+    permissions:
+      - action: publish
+        path: live-webrtc
+  - user: any
+    pass:
+    ips: [127.0.0.1, "::1"]
+    permissions:
+      - action: api
+      - action: metrics
+      - action: pprof
+
+# The ASP.NET application reads this local-only API to display live status.
+api: true
+apiAddress: 127.0.0.1:9997
+apiEncryption: false
+apiAllowOrigins: []
+
+# WebRTC is the primary low-latency viewer path. HLS remains as a fallback.
+rtsp: false
+webrtc: true
+webrtcAddress: :8889
+webrtcEncryption: false
+webrtcAllowOrigins: ["*"]
+webrtcLocalUDPAddress: :8189
+webrtcAdditionalHosts: []
+srt: false
+moq: false
+playback: true
+playbackAddress: 127.0.0.1:9996
+playbackEncryption: false
+playbackAllowOrigins: []
+metrics: false
+pprof: false
+
+# StockCaster Live publishes with the protected stream key shown in the console.
+rtmp: true
+rtmpEncryption: "no"
+rtmpAddress: :1935
+
+# Member browsers play the same path through HLS.
+hls: true
+hlsAddress: :8888
+hlsEncryption: false
+hlsAllowOrigins: ["*"]
+hlsAlwaysRemux: false
+hlsVariant: lowLatency
+hlsSegmentCount: 7
+hlsSegmentDuration: 1s
+hlsPartDuration: 200ms
+
+pathDefaults:
+  source: publisher
+  overridePublisher: true
+  record: true
+  recordPath: ./recordings/%path/%Y-%m-%d_%H-%M-%S-%f
+  recordFormat: fmp4
+  recordPartDuration: 1s
+  recordMaxPartSize: 50M
+  recordSegmentDuration: 12h
+  recordDeleteAfter: 0s
+
+paths:
+  live:
+  live-webrtc:
+    record: false
