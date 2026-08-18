@@ -10,6 +10,7 @@ public sealed class MediaServerHostedService : BackgroundService
     private readonly BroadcastSecurityService _broadcastSecurity;
     private Process? _process;
     private bool _ownsProcess;
+    private volatile bool _shutdownRequested;
 
     public bool IsRunning
     {
@@ -89,7 +90,7 @@ public sealed class MediaServerHostedService : BackgroundService
         try
         {
             await _process.WaitForExitAsync(stoppingToken);
-            if (!stoppingToken.IsCancellationRequested)
+            if (!stoppingToken.IsCancellationRequested && !_shutdownRequested)
                 _logger.LogError("MediaMTX 방송 서버가 예기치 않게 종료되었습니다. 종료 코드: {ExitCode}", _process.ExitCode);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -104,6 +105,7 @@ public sealed class MediaServerHostedService : BackgroundService
         {
             try
             {
+                _shutdownRequested = true;
                 process.Kill(entireProcessTree: true);
                 await process.WaitForExitAsync(cancellationToken);
             }
