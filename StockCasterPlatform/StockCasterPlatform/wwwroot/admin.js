@@ -40,9 +40,11 @@
 
   const showDashboard = user => {
     currentUser = user;
-    document.getElementById("adminIdentity").textContent = `${user.displayName} 님`;
+    document.getElementById("adminIdentity").textContent = `${user.displayName} 님 · ${user.roleLabel || "관리자"}`;
     loginCard.classList.add("hidden");
     dashboard.classList.remove("hidden");
+    document.querySelectorAll(".admin-admin-only").forEach(element =>
+      element.classList.toggle("hidden", user.role !== "Admin"));
     clearInterval(refreshTimer);
     refreshTimer = setInterval(loadDashboard, 4000);
   };
@@ -69,13 +71,13 @@
       copy.className = "member-copy";
       const title = document.createElement("strong");
       title.textContent = member.displayName;
-      if (member.isAdmin) {
+      if (member.roleLabel) {
         const adminBadge = document.createElement("i");
-        adminBadge.textContent = "운영자";
+        adminBadge.textContent = member.roleLabel;
         title.append(" ", adminBadge);
       }
       const details = document.createElement("span");
-      details.textContent = `@${member.username} · ${member.tierLabel} · ${formatDate(member.createdAt)} 가입`;
+      details.textContent = `@${member.username} · ${member.roleLabel || "일반 회원"} · ${member.tierLabel} · ${formatDate(member.createdAt)} 가입`;
       if (member.isMuted) {
         const restriction = member.mutedUntil ? `${formatDate(member.mutedUntil)}까지 채팅 제한` : "채팅 영구 제한";
         details.textContent += ` · ${restriction}`;
@@ -98,6 +100,18 @@
           tier.append(option);
         });
         tier.addEventListener("change", () => setMemberTier(member, tier.value));
+
+        const role = document.createElement("select");
+        role.className = "role-select";
+        role.setAttribute("aria-label", `${member.displayName} 권한`);
+        [{ value: "Member", label: "일반 회원" }, { value: "Broadcaster", label: "방송 진행자" }, { value: "ChatModerator", label: "채팅 관리자" }].forEach(optionData => {
+          const option = document.createElement("option");
+          option.value = optionData.value;
+          option.textContent = optionData.label;
+          option.selected = member.role === optionData.value;
+          role.append(option);
+        });
+        role.addEventListener("change", () => setMemberRole(member, role.value));
 
         const muteDuration = document.createElement("select");
         muteDuration.className = "mute-duration-select";
@@ -128,7 +142,7 @@
         deleteButton.textContent = "회원 삭제";
         deleteButton.addEventListener("click", () => deleteMember(member));
 
-        actions.append(tier, muteDuration, muteButton, deleteButton);
+        actions.append(tier, role, muteDuration, muteButton, deleteButton);
         item.append(actions);
       }
       container.append(item);
@@ -252,6 +266,59 @@
     });
   };
 
+  const renderReports = reports => {
+    const container = document.getElementById("reportList");
+    container.replaceChildren();
+    document.getElementById("reportCount").textContent = `${reports.filter(report => report.status === "Open").length}건 처리 대기`;
+    if (!reports.length) {
+      container.innerHTML = '<div class="admin-empty">접수된 신고가 없습니다.</div>';
+      return;
+    }
+    reports.forEach(report => {
+      const row = document.createElement("article");
+      row.className = `moderation-row ${report.status.toLowerCase()}`;
+      const copy = document.createElement("div");
+      const title = document.createElement("strong");
+      title.textContent = `${report.category} · ${report.status === "Open" ? "처리 대기" : report.status === "Resolved" ? "처리 완료" : "기각"}`;
+      const details = document.createElement("p");
+      details.textContent = `${report.reporterName} 신고 · ${report.targetMemberName || "대상 미상"}${report.details ? ` · ${report.details}` : ""}`;
+      const time = document.createElement("time");
+      time.textContent = formatDate(report.createdAt);
+      copy.append(title, details, time);
+      const action = document.createElement("button");
+      action.className = "moderation-button";
+      action.textContent = report.status === "Open" ? "처리 완료" : "다시 열기";
+      action.addEventListener("click", async () => {
+        await request(`/api/admin/reports/${report.id}`, { method: "PUT", body: JSON.stringify({ status: report.status === "Open" ? "Resolved" : "Open" }) });
+        showToast("신고 상태를 변경했습니다.");
+        await loadDashboard();
+      });
+      row.append(copy, action);
+      container.append(row);
+    });
+  };
+
+  const renderActivityLogs = logs => {
+    const container = document.getElementById("activityLogList");
+    container.replaceChildren();
+    if (!logs.length) {
+      container.innerHTML = '<div class="admin-empty">활동 로그가 없습니다.</div>';
+      return;
+    }
+    logs.slice(0, 100).forEach(log => {
+      const row = document.createElement("div");
+      row.className = "activity-log-row";
+      const actor = document.createElement("strong");
+      actor.textContent = log.actorName;
+      const detail = document.createElement("span");
+      detail.textContent = `${log.action} · ${log.details || log.target}`;
+      const time = document.createElement("time");
+      time.textContent = formatDate(log.createdAt);
+      row.append(actor, detail, time);
+      container.append(row);
+    });
+  };
+
   const renderChatPolicy = policy => {
     if (!chatPolicyDirty) {
       document.getElementById("chatPinnedNoticeInput").value = policy.pinnedNotice || "";
@@ -281,14 +348,28 @@
 
   const loadDashboard = async () => {
     try {
-      const [summary, members, messages, replays, security, chatPolicy, tickerMessages] = await Promise.all([
+      if (currentUser?.role === "ChatModerator") {
+        const [messages, chatPolicy, reports] = await Promise.all([
+          request("/api/admin/messages"),
+          request("/api/admin/chat/policy"),
+          request("/api/admin/reports")
+        ]);
+        document.getElementById("messageStat").textContent = messages.length;
+        renderMessages(messages);
+        renderChatPolicy(chatPolicy);
+        renderReports(reports);
+        return;
+      }
+      const [summary, members, messages, replays, security, chatPolicy, tickerMessages, reports, activityLogs] = await Promise.all([
         request("/api/admin/summary"),
         request("/api/admin/members"),
         request("/api/admin/messages"),
         request("/api/admin/replays"),
         request("/api/studio/config"),
         request("/api/admin/chat/policy"),
-        request("/api/admin/ticker")
+        request("/api/admin/ticker"),
+        request("/api/admin/reports"),
+        request("/api/admin/activity-logs")
       ]);
       document.getElementById("memberStat").textContent = summary.memberCount;
       document.getElementById("premiumStat").textContent = summary.premiumCount;
@@ -302,6 +383,8 @@
       renderReplays(replays);
       renderChatPolicy(chatPolicy);
       renderTickerMessages(tickerMessages);
+      renderReports(reports);
+      renderActivityLogs(activityLogs);
     } catch (error) {
       if (error.status === 401 || error.status === 403) showLogin(error.message);
     }
@@ -323,6 +406,15 @@
       body: JSON.stringify({ tier })
     });
     showToast(`${member.displayName} 님을 ${tier === "Premium" ? "프리미엄" : "무료"} 회원으로 변경했습니다.`);
+    await loadDashboard();
+  };
+
+  const setMemberRole = async (member, role) => {
+    await request(`/api/admin/members/${member.id}/role`, {
+      method: "PUT",
+      body: JSON.stringify({ role })
+    });
+    showToast(`${member.displayName} 님의 권한을 변경했습니다.`);
     await loadDashboard();
   };
 
@@ -419,9 +511,9 @@
           password: document.getElementById("adminPassword").value
         })
       });
-      if (!result.user.isAdmin) {
+      if (!["Admin", "ChatModerator"].includes(result.user.role)) {
         await request("/api/auth/logout", { method: "POST", body: "{}" });
-        throw new Error("운영자 계정으로 로그인해 주세요.");
+        throw new Error("관리 권한이 있는 계정으로 로그인해 주세요.");
       }
       showDashboard(result.user);
       await loadDashboard();
@@ -492,11 +584,11 @@
   window.addEventListener("load", async () => {
     try {
       const result = await request("/api/auth/me");
-      if (result.isAuthenticated && result.user.isAdmin) {
+      if (result.isAuthenticated && ["Admin", "ChatModerator"].includes(result.user.role)) {
         showDashboard(result.user);
         await loadDashboard();
       } else {
-        showLogin(result.isAuthenticated ? "운영자 계정으로 로그인해 주세요." : "");
+        showLogin(result.isAuthenticated ? "관리 권한이 있는 계정으로 로그인해 주세요." : "");
       }
     } catch { showLogin(); }
   });

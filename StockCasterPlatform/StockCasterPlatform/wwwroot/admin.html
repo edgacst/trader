@@ -47,7 +47,7 @@
         </div>
       </div>
 
-      <div class="admin-stats six">
+      <div id="adminStats" class="admin-stats six admin-admin-only">
         <article><span>전체 회원</span><strong id="memberStat">0</strong><i>명</i></article>
         <article><span>프리미엄</span><strong id="premiumStat">0</strong><i>명</i></article>
         <article><span>채팅 접속</span><strong id="onlineStat">0</strong><i>명</i></article>
@@ -56,7 +56,7 @@
         <article><span>다시보기</span><strong id="replayStat">0</strong><i>개</i></article>
       </div>
 
-      <section class="admin-card ticker-admin-card">
+      <section class="admin-card ticker-admin-card admin-admin-only">
         <div class="console-heading">
           <div><h2>스크롤 공지 관리</h2><span>랜딩·라이브·다시보기 상단에 실시간으로 표시됩니다</span></div>
           <span id="tickerMessageCount">0 / 20개</span>
@@ -94,7 +94,7 @@
       </section>
 
       <div class="admin-grid">
-        <section class="admin-card">
+        <section id="memberAdminCard" class="admin-card admin-admin-only">
           <div class="console-heading">
             <div><h2>회원 관리</h2><span>무료·프리미엄 등급과 채팅 권한 설정</span></div>
           </div>
@@ -108,7 +108,7 @@
           <div id="adminMessageList" class="admin-message-list"></div>
         </section>
       </div>
-      <section class="admin-card admin-security-card">
+      <section class="admin-card admin-security-card admin-admin-only">
         <div class="console-heading">
           <div><h2>보안 설정</h2><span>운영자 비밀번호와 RTMP 송출 보안키를 관리합니다</span></div>
         </div>
@@ -134,12 +134,20 @@
           </div>
         </div>
       </section>
-      <section class="admin-card admin-replay-card">
+      <section class="admin-card admin-replay-card admin-admin-only">
         <div class="console-heading">
           <div><h2>다시보기 관리</h2><span>제목과 회원 공개 여부를 설정합니다</span></div>
           <a class="small-refresh admin-preview-link" href="/replays" target="_blank" rel="noopener">회원 페이지 ↗</a>
         </div>
         <div id="adminReplayList" class="admin-replay-list"></div>
+      </section>
+      <section class="admin-card moderation-card">
+        <div class="console-heading"><div><h2>회원 신고 관리</h2><span>접수된 채팅 신고를 확인하고 처리합니다</span></div><span id="reportCount">0건</span></div>
+        <div id="reportList" class="moderation-list"></div>
+      </section>
+      <section class="admin-card admin-activity-card admin-admin-only">
+        <div class="console-heading"><div><h2>관리자 활동 로그</h2><span>권한 변경·채팅 조치·신고 처리를 기록합니다</span></div></div>
+        <div id="activityLogList" class="activity-log-list"></div>
       </section>
       <div id="adminToast" class="copy-toast">처리했습니다</div>
     </section>

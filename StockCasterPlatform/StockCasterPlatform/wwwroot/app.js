@@ -33,6 +33,7 @@
   let hasLiveAccess = false;
   let liveAccessReason = "login";
   let broadcastInfo = null;
+  let reminderTimer = null;
 
   const formatSchedule = value => {
     const date = new Date(value);
@@ -52,6 +53,11 @@
       scheduleCaption.textContent = "현재 진행 중인 라이브";
       scheduleTime.textContent = "지금 LIVE";
       scheduleDescription.textContent = "회원 시청 화면으로 방송 중입니다.";
+      const reminderButton = document.getElementById("scheduleReminderButton");
+      if (reminderButton) {
+        reminderButton.disabled = true;
+        reminderButton.textContent = "방송 진행 중";
+      }
       return;
     }
 
@@ -61,6 +67,36 @@
     scheduleDescription.textContent = formatted
       ? "예정 시간에 이 화면에서 자동 연결됩니다."
       : "방송 시작 시 자동 연결됩니다.";
+    const reminderButton = document.getElementById("scheduleReminderButton");
+    if (reminderButton) {
+      const scheduledAt = broadcastInfo?.scheduledAt ? new Date(broadcastInfo.scheduledAt) : null;
+      const reminderSaved = localStorage.getItem("stockcaster.scheduleReminder") === broadcastInfo?.scheduledAt;
+      reminderButton.disabled = !scheduledAt || scheduledAt.getTime() <= Date.now();
+      reminderButton.textContent = reminderSaved ? "방송 알림 켜짐" : "방송 알림 켜기";
+      reminderButton.classList.toggle("active", reminderSaved);
+    }
+    scheduleBrowserReminder();
+  };
+
+  const scheduleBrowserReminder = () => {
+    clearTimeout(reminderTimer);
+    const value = broadcastInfo?.scheduledAt;
+    if (!value || localStorage.getItem("stockcaster.scheduleReminder") !== value) return;
+    const target = new Date(value).getTime();
+    const remaining = target - Date.now();
+    if (remaining <= 0) {
+      localStorage.removeItem("stockcaster.scheduleReminder");
+      return;
+    }
+    reminderTimer = setTimeout(() => {
+      if (remaining > 2_000_000_000) scheduleBrowserReminder();
+      else {
+        if ("Notification" in window && Notification.permission === "granted")
+          new Notification("StockCaster 방송 시작", { body: broadcastInfo?.title || "예정된 라이브 방송이 시작됩니다." });
+        localStorage.removeItem("stockcaster.scheduleReminder");
+        updateSchedule(lastKnownLive);
+      }
+    }, Math.min(remaining, 2_000_000_000));
   };
 
   const applyBroadcastInfo = info => {
@@ -349,6 +385,24 @@
     } catch {
       showOverlay("전체화면을 열지 못했습니다", "브라우저 메뉴의 전체화면 기능을 이용해 주세요.");
     }
+  });
+
+  document.getElementById("scheduleReminderButton")?.addEventListener("click", async event => {
+    const value = broadcastInfo?.scheduledAt;
+    if (!value) return;
+    if (!("Notification" in window)) {
+      showOverlay("알림을 지원하지 않는 브라우저입니다", "방송 일정을 직접 확인해 주세요.");
+      return;
+    }
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") {
+      showOverlay("알림 권한이 필요합니다", "브라우저 주소창의 알림 권한을 허용해 주세요.");
+      return;
+    }
+    localStorage.setItem("stockcaster.scheduleReminder", value);
+    event.currentTarget.textContent = "방송 알림 켜짐";
+    event.currentTarget.classList.add("active");
+    scheduleBrowserReminder();
   });
 
   document.addEventListener("fullscreenchange", () => {

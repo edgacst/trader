@@ -199,13 +199,13 @@ public sealed class ChatService
         }
 
         ChatPolicy policy = await _policyService.GetAsync(cancellationToken);
-        if (!currentMember.IsAdmin && policy.BlockedWords.Any(word => text.Contains(word, StringComparison.OrdinalIgnoreCase)))
+        if (!MemberRoles.CanModerateChat(currentMember) && policy.BlockedWords.Any(word => text.Contains(word, StringComparison.OrdinalIgnoreCase)))
         {
             await connection.SendAsync(new { type = "error", message = "사용할 수 없는 표현이 포함되어 있습니다." }, cancellationToken);
             return;
         }
 
-        if (!currentMember.IsAdmin)
+        if (!MemberRoles.CanModerateChat(currentMember))
         {
             ChatRateCheck rateCheck = _rateStates
                 .GetOrAdd(memberId, _ => new ChatRateState())
@@ -228,7 +228,7 @@ public sealed class ChatService
             currentMember.Username,
             currentMember.DisplayName,
             text,
-            currentMember.IsAdmin,
+            currentMember.Role != MemberRoles.Member,
             DateTimeOffset.Now);
 
         await _messageGate.WaitAsync(cancellationToken);

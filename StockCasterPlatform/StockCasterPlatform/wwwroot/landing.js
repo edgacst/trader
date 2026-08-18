@@ -9,6 +9,8 @@
     loginForm: document.getElementById("loginForm"),
     registerForm: document.getElementById("registerForm"),
     logoutButton: document.getElementById("logoutButton"),
+    resendVerificationButton: document.getElementById("resendVerificationButton"),
+    withdrawButton: document.getElementById("withdrawButton"),
     accountTier: document.getElementById("accountTier"),
     adminLink: document.getElementById("adminLink"),
     studioLink: document.getElementById("studioLink"),
@@ -62,14 +64,15 @@
     document.getElementById("accountName").textContent = currentUser.displayName;
     document.getElementById("accountUsername").textContent = `@${currentUser.username}`;
     document.getElementById("accountAvatar").textContent = currentUser.displayName.slice(0, 2).toUpperCase();
-    elements.accountTier.textContent = currentUser.isAdmin
-      ? "운영자 · 전체 서비스 권한"
+    elements.accountTier.textContent = currentUser.roleLabel
+      ? `${currentUser.roleLabel} · ${currentUser.emailVerified ? "이메일 인증 완료" : "이메일 인증 필요"}`
       : currentUser.canWatchReplay
         ? "프리미엄 회원 · 라이브·다시보기"
         : "무료 회원 · 라이브 시청";
     elements.accountTier.classList.toggle("premium", Boolean(currentUser.canWatchReplay));
     elements.adminLink.classList.toggle("hidden", !currentUser.isAdmin);
-    elements.studioLink.classList.toggle("hidden", !currentUser.isAdmin);
+    elements.studioLink.classList.toggle("hidden", !["Admin", "Broadcaster"].includes(currentUser.role));
+    elements.resendVerificationButton.classList.toggle("hidden", Boolean(currentUser.emailVerified));
   };
 
   const renderAuth = () => {
@@ -192,9 +195,18 @@
         body: JSON.stringify({
           username: document.getElementById("registerUsername").value,
           displayName: document.getElementById("registerDisplayName").value,
-          password: document.getElementById("registerPassword").value
+          email: document.getElementById("registerEmail").value,
+          password: document.getElementById("registerPassword").value,
+          termsAccepted: document.getElementById("registerTerms").checked,
+          privacyAccepted: document.getElementById("registerPrivacy").checked
         })
       });
+      if (result.emailVerificationRequired) {
+        elements.registerForm.reset();
+        setError(result.message || "이메일 인증 후 로그인해 주세요.");
+        selectTab("login");
+        return;
+      }
       currentUser = result.user;
       elements.registerForm.reset();
       renderAuth();
@@ -212,6 +224,26 @@
       hideModal();
       renderAuth();
     }
+  });
+
+  elements.resendVerificationButton.addEventListener("click", async () => {
+    try {
+      const result = await request("/api/auth/resend-verification", { method: "POST", body: "{}" });
+      setError(result.message || "인증 이메일을 보냈습니다.");
+    } catch (error) { setError(error.message); }
+  });
+
+  elements.withdrawButton.addEventListener("click", async () => {
+    const password = prompt("탈퇴를 확인하려면 현재 비밀번호를 입력해 주세요.");
+    if (password === null) return;
+    if (!confirm("회원 탈퇴 후 계정과 채팅 기록은 복구할 수 없습니다. 계속할까요?")) return;
+    try {
+      await request("/api/auth/withdraw", { method: "POST", body: JSON.stringify({ password }) });
+      currentUser = null;
+      hideModal();
+      renderAuth();
+      alert("회원 탈퇴가 완료되었습니다.");
+    } catch (error) { setError(error.message); }
   });
 
   window.addEventListener("load", async () => {

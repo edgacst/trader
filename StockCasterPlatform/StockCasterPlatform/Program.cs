@@ -1,5 +1,6 @@
 using System.Net.WebSockets;
 using System.Security.Claims;
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using StockCasterPlatform;
@@ -14,11 +15,16 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 
 builder.WebHost.UseUrls(builder.Configuration["WebServer:Urls"] ?? "http://0.0.0.0:5075");
 builder.Services.AddSingleton<BroadcastSecurityService>();
+builder.Services.AddSingleton<EmailDeliveryService>();
+builder.Services.AddSingleton<LoginAttemptService>();
+builder.Services.AddSingleton<ModerationService>();
 builder.Services.AddSingleton<MediaServerHostedService>();
 builder.Services.AddHostedService(provider => provider.GetRequiredService<MediaServerHostedService>());
 builder.Services.AddSingleton<MemberStore>();
 builder.Services.AddSingleton<BroadcastInfoService>();
 builder.Services.AddSingleton<LiveStatusService>();
+builder.Services.AddSingleton<BroadcastAlertService>();
+builder.Services.AddHostedService(provider => provider.GetRequiredService<BroadcastAlertService>());
 builder.Services.AddSingleton<ChatPolicyService>();
 builder.Services.AddSingleton<ChatService>();
 builder.Services.AddSingleton<ReplayService>();
@@ -65,6 +71,19 @@ builder.Services.AddHttpClient("MediaHls", client =>
     client.BaseAddress = new Uri("http://127.0.0.1:8888");
     client.Timeout = TimeSpan.FromMinutes(5);
 });
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("auth", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 12,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0,
+            AutoReplenishment = true
+        }));
+});
 
 var app = builder.Build();
 
@@ -87,8 +106,29 @@ app.UseStaticFiles(new StaticFileOptions
     }
 });
 app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(20) });
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
+app.Use(async (context, next) =>
+{
+    await next();
+    if (!context.Request.Path.StartsWithSegments("/api/admin") || context.Request.Method == HttpMethods.Get ||
+        context.User.Identity?.IsAuthenticated != true)
+        return;
+    try
+    {
+        MemberStore memberStore = context.RequestServices.GetRequiredService<MemberStore>();
+        ModerationService moderation = context.RequestServices.GetRequiredService<ModerationService>();
+        Member? actor = await GetCurrentMemberAsync(context, memberStore, CancellationToken.None);
+        await moderation.RecordActivityAsync(
+            actor,
+            $"{context.Request.Method} {context.Request.Path}",
+            context.Response.StatusCode.ToString(),
+            "관리자 요청",
+            CancellationToken.None);
+    }
+    catch { /* 감사 로그 실패가 운영 요청을 중단시키지 않도록 합니다. */ }
+});
 
 app.MapGet("/live", () => Results.Redirect("/live.html"));
 app.MapGet("/replays", () => Results.Redirect("/replays.html"));
@@ -143,7 +183,7 @@ app.MapGet("/api/studio/config", async (
         rtmpServerUrl = $"rtmp://{host}:1935",
         streamKey = credentials.StreamKey
     });
-}).RequireAuthorization(policy => policy.RequireRole("Admin"));
+}).RequireAuthorization(policy => policy.RequireRole(MemberRoles.Admin, MemberRoles.Broadcaster));
 
 app.MapGet("/api/replays", async (ReplayService replays, CancellationToken cancellationToken) =>
     Results.Ok(await replays.GetReplaysAsync(false, cancellationToken)));
@@ -166,42 +206,146 @@ app.MapPost("/api/auth/register", async (
     RegisterRequest request,
     HttpContext context,
     MemberStore members,
+    EmailDeliveryService emailDelivery,
     CancellationToken cancellationToken) =>
 {
     MemberResult result = await members.RegisterAsync(
         request.Username ?? string.Empty,
         request.DisplayName ?? string.Empty,
+        request.Email ?? string.Empty,
         request.Password ?? string.Empty,
+        request.TermsAccepted,
+        request.PrivacyAccepted,
         cancellationToken);
     if (!result.Success || result.Member is null)
         return Results.BadRequest(new { error = result.Error });
 
+    bool verificationSent = false;
+    if (!result.Member.EmailVerified)
+    {
+        var token = await members.CreateEmailVerificationTokenAsync(result.Member.Id, cancellationToken);
+        if (token is not null)
+            verificationSent = await emailDelivery.SendVerificationAsync(result.Member.Email, token.Value.Token, cancellationToken);
+    }
+    if (emailDelivery.RequireVerification)
+    {
+        return Results.Ok(new
+        {
+            isAuthenticated = false,
+            emailVerificationRequired = true,
+            emailVerificationSent = verificationSent,
+            message = verificationSent
+                ? "이메일로 전송된 인증 링크를 확인해 주세요."
+                : "이메일 인증을 위해 운영자에게 SMTP 설정을 요청해 주세요."
+        });
+    }
+
     await SignInMemberAsync(context, result.Member);
-    return Results.Ok(new { isAuthenticated = true, user = MemberStore.ToView(result.Member) });
-});
+    return Results.Ok(new { isAuthenticated = true, user = MemberStore.ToView(result.Member), emailVerificationSent = verificationSent });
+}).RequireRateLimiting("auth");
 
 app.MapPost("/api/auth/login", async (
     LoginRequest request,
     HttpContext context,
     MemberStore members,
+    LoginAttemptService loginAttempts,
     CancellationToken cancellationToken) =>
 {
+    string attemptKey = $"{context.Connection.RemoteIpAddress}:{(request.Username ?? string.Empty).Trim().ToLowerInvariant()}";
+    if (loginAttempts.IsBlocked(attemptKey, out int retryAfterSeconds))
+    {
+        context.Response.Headers.RetryAfter = retryAfterSeconds.ToString();
+        return Results.Json(new { error = "로그인 시도가 많아 잠시 차단되었습니다.", retryAfterSeconds }, statusCode: StatusCodes.Status429TooManyRequests);
+    }
     Member? member = await members.AuthenticateAsync(
         request.Username ?? string.Empty,
         request.Password ?? string.Empty,
         cancellationToken);
     if (member is null)
+    {
+        loginAttempts.RegisterFailure(attemptKey);
         return Results.Json(new { error = "아이디 또는 비밀번호가 맞지 않습니다." }, statusCode: StatusCodes.Status401Unauthorized);
+    }
 
+    loginAttempts.RegisterSuccess(attemptKey);
     await SignInMemberAsync(context, member);
     return Results.Ok(new { isAuthenticated = true, user = MemberStore.ToView(member) });
-});
+}).RequireRateLimiting("auth");
+
+app.MapPost("/api/auth/verify-email", async (
+    VerifyEmailRequest request,
+    MemberStore members,
+    CancellationToken cancellationToken) =>
+{
+    MemberResult result = await members.VerifyEmailAsync(request.Token ?? string.Empty, cancellationToken);
+    return result.Success
+        ? Results.Ok(new { success = true, message = "이메일 인증이 완료되었습니다." })
+        : Results.BadRequest(new { error = result.Error });
+}).RequireRateLimiting("auth");
+
+app.MapPost("/api/auth/resend-verification", async (
+    HttpContext context,
+    MemberStore members,
+    EmailDeliveryService emailDelivery,
+    CancellationToken cancellationToken) =>
+{
+    Guid? memberId = GetMemberId(context.User);
+    if (memberId is null)
+        return Results.Unauthorized();
+    Member? member = await members.GetByIdAsync(memberId.Value, cancellationToken);
+    if (member is null || member.EmailVerified || string.IsNullOrWhiteSpace(member.Email))
+        return Results.BadRequest(new { error = "인증이 필요한 이메일 계정을 찾을 수 없습니다." });
+    var token = await members.CreateEmailVerificationTokenAsync(member.Id, cancellationToken);
+    bool sent = token is not null && await emailDelivery.SendVerificationAsync(member.Email, token.Value.Token, cancellationToken);
+    return sent
+        ? Results.Ok(new { success = true, message = "인증 이메일을 다시 보냈습니다." })
+        : Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+}).RequireRateLimiting("auth");
+
+app.MapPost("/api/auth/forgot-password", async (
+    ForgotPasswordRequest request,
+    MemberStore members,
+    EmailDeliveryService emailDelivery,
+    CancellationToken cancellationToken) =>
+{
+    var token = await members.CreatePasswordResetTokenAsync(request.Email ?? string.Empty, cancellationToken);
+    if (token is not null)
+        await emailDelivery.SendPasswordResetAsync(token.Value.Email, token.Value.Token, cancellationToken);
+    return Results.Ok(new { message = "해당 이메일이 등록되어 있다면 비밀번호 재설정 안내를 보냈습니다." });
+}).RequireRateLimiting("auth");
+
+app.MapPost("/api/auth/reset-password", async (
+    ResetPasswordRequest request,
+    MemberStore members,
+    CancellationToken cancellationToken) =>
+{
+    MemberResult result = await members.ResetPasswordAsync(request.Token ?? string.Empty, request.NewPassword ?? string.Empty, cancellationToken);
+    return result.Success
+        ? Results.Ok(new { success = true, message = "비밀번호를 변경했습니다." })
+        : Results.BadRequest(new { error = result.Error });
+}).RequireRateLimiting("auth");
 
 app.MapPost("/api/auth/logout", async (HttpContext context) =>
 {
     await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
     return Results.Ok(new { success = true });
 });
+
+app.MapPost("/api/auth/withdraw", async (
+    WithdrawRequest request,
+    HttpContext context,
+    MemberStore members,
+    CancellationToken cancellationToken) =>
+{
+    Guid? memberId = GetMemberId(context.User);
+    if (memberId is null)
+        return Results.Unauthorized();
+    bool deleted = await members.WithdrawAsync(memberId.Value, request.Password ?? string.Empty, cancellationToken);
+    if (!deleted)
+        return Results.BadRequest(new { error = "비밀번호가 올바르지 않거나 운영자 계정은 탈퇴할 수 없습니다." });
+    await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+    return Results.Ok(new { success = true });
+}).RequireAuthorization();
 
 app.MapGet("/api/auth/me", async (HttpContext context, MemberStore members, CancellationToken cancellationToken) =>
 {
@@ -214,6 +358,30 @@ app.MapGet("/api/auth/me", async (HttpContext context, MemberStore members, Canc
         ? Results.Ok(new { isAuthenticated = false })
         : Results.Ok(new { isAuthenticated = true, user = MemberStore.ToView(member) });
 });
+
+app.MapPost("/api/reports", async (
+    ReportRequest request,
+    HttpContext context,
+    MemberStore members,
+    ModerationService moderation,
+    CancellationToken cancellationToken) =>
+{
+    Member? reporter = await GetCurrentMemberAsync(context, members, cancellationToken);
+    if (reporter is null)
+        return Results.Unauthorized();
+    Member? target = request.TargetMemberId is Guid targetId
+        ? await members.GetByIdAsync(targetId, cancellationToken)
+        : null;
+    ReportItem report = await moderation.AddReportAsync(
+        reporter,
+        request.MessageId,
+        target,
+        request.Category ?? "기타",
+        request.Details ?? string.Empty,
+        cancellationToken);
+    await moderation.RecordActivityAsync(reporter, "ReportCreated", report.Id.ToString("D"), report.Category, cancellationToken);
+    return Results.Ok(new { success = true, reportId = report.Id });
+}).RequireAuthorization();
 
 app.Map("/ws/chat", async context =>
 {
@@ -263,6 +431,33 @@ app.MapGet("/api/admin/summary", async (
     });
 }).RequireAuthorization(policy => policy.RequireRole("Admin"));
 
+app.MapGet("/api/studio/alerts", (BroadcastAlertService alerts) => Results.Ok(alerts.GetLatest()))
+    .RequireAuthorization(policy => policy.RequireRole(MemberRoles.Admin, MemberRoles.Broadcaster));
+
+app.MapGet("/api/admin/reports", async (ModerationService moderation, CancellationToken cancellationToken) =>
+    Results.Ok(await moderation.GetReportsAsync(cancellationToken)))
+    .RequireAuthorization(policy => policy.RequireRole(MemberRoles.Admin, MemberRoles.ChatModerator));
+
+app.MapPut("/api/admin/reports/{reportId:guid}", async (
+    Guid reportId,
+    ReportStatusRequest request,
+    HttpContext context,
+    MemberStore members,
+    ModerationService moderation,
+    CancellationToken cancellationToken) =>
+{
+    Member? actor = await GetCurrentMemberAsync(context, members, cancellationToken);
+    if (actor is null) return Results.Unauthorized();
+    ReportItem? report = await moderation.SetReportStatusAsync(reportId, request.Status ?? "Resolved", actor, cancellationToken);
+    if (report is null) return Results.NotFound(new { error = "신고 내역을 찾을 수 없습니다." });
+    await moderation.RecordActivityAsync(actor, "ReportStatusChanged", report.Id.ToString("D"), report.Status, cancellationToken);
+    return Results.Ok(report);
+}).RequireAuthorization(policy => policy.RequireRole(MemberRoles.Admin, MemberRoles.ChatModerator));
+
+app.MapGet("/api/admin/activity-logs", async (ModerationService moderation, CancellationToken cancellationToken) =>
+    Results.Ok(await moderation.GetActivityLogsAsync(cancellationToken)))
+    .RequireAuthorization(policy => policy.RequireRole(MemberRoles.Admin));
+
 app.MapPut("/api/admin/members/{memberId:guid}/tier", async (
     Guid memberId,
     MemberTierRequest request,
@@ -274,6 +469,18 @@ app.MapPut("/api/admin/members/{memberId:guid}/tier", async (
         ? Results.Ok(MemberStore.ToView(result.Member))
         : Results.BadRequest(new { error = result.Error });
 }).RequireAuthorization(policy => policy.RequireRole("Admin"));
+
+app.MapPut("/api/admin/members/{memberId:guid}/role", async (
+    Guid memberId,
+    MemberRoleRequest request,
+    MemberStore members,
+    CancellationToken cancellationToken) =>
+{
+    MemberResult result = await members.SetRoleAsync(memberId, request.Role ?? string.Empty, cancellationToken);
+    return result.Success && result.Member is not null
+        ? Results.Ok(MemberStore.ToView(result.Member))
+        : Results.BadRequest(new { error = result.Error });
+}).RequireAuthorization(policy => policy.RequireRole(MemberRoles.Admin));
 
 app.MapDelete("/api/admin/members/{memberId:guid}", async (
     Guid memberId,
@@ -345,15 +552,15 @@ app.MapPut("/api/admin/live/info", async (
     return result.Success && result.Info is not null
         ? Results.Ok(result.Info)
         : Results.BadRequest(new { error = result.Error });
-}).RequireAuthorization(policy => policy.RequireRole("Admin"));
+}).RequireAuthorization(policy => policy.RequireRole(MemberRoles.Admin, MemberRoles.Broadcaster));
 
 app.MapGet("/api/admin/messages", async (ChatService chat, CancellationToken cancellationToken) =>
     Results.Ok(await chat.GetMessagesAsync(cancellationToken)))
-    .RequireAuthorization(policy => policy.RequireRole("Admin"));
+    .RequireAuthorization(policy => policy.RequireRole(MemberRoles.Admin, MemberRoles.ChatModerator));
 
 app.MapGet("/api/admin/chat/policy", async (ChatPolicyService chatPolicy, CancellationToken cancellationToken) =>
     Results.Ok(await chatPolicy.GetAsync(cancellationToken)))
-    .RequireAuthorization(policy => policy.RequireRole("Admin"));
+    .RequireAuthorization(policy => policy.RequireRole(MemberRoles.Admin, MemberRoles.ChatModerator));
 
 app.MapPut("/api/admin/chat/policy", async (
     ChatPolicyUpdateRequest request,
@@ -371,7 +578,7 @@ app.MapPut("/api/admin/chat/policy", async (
 
     await chat.BroadcastPolicyAsync(result.Policy, cancellationToken);
     return Results.Ok(result.Policy);
-}).RequireAuthorization(policy => policy.RequireRole("Admin"));
+}).RequireAuthorization(policy => policy.RequireRole(MemberRoles.Admin, MemberRoles.ChatModerator));
 
 app.MapGet("/api/admin/ticker", async (TickerService ticker, CancellationToken cancellationToken) =>
     Results.Ok(await ticker.GetAsync(cancellationToken)))
@@ -386,7 +593,7 @@ app.MapPost("/api/admin/ticker", async (
     return result.Success
         ? Results.Ok(result.Message)
         : Results.BadRequest(new { error = result.Error });
-}).RequireAuthorization(policy => policy.RequireRole("Admin"));
+}).RequireAuthorization(policy => policy.RequireRole(MemberRoles.Admin, MemberRoles.ChatModerator));
 
 app.MapDelete("/api/admin/ticker/{messageId:guid}", async (
     Guid messageId,
@@ -397,7 +604,7 @@ app.MapDelete("/api/admin/ticker/{messageId:guid}", async (
     return removed
         ? Results.Ok(new { success = true })
         : Results.NotFound(new { error = "스크롤 공지를 찾을 수 없습니다." });
-}).RequireAuthorization(policy => policy.RequireRole("Admin"));
+}).RequireAuthorization(policy => policy.RequireRole(MemberRoles.Admin, MemberRoles.ChatModerator));
 
 app.MapPost("/api/admin/members/{memberId:guid}/mute", async (
     Guid memberId,
@@ -593,8 +800,8 @@ static async Task SignInMemberAsync(HttpContext context, Member member)
         new(ClaimTypes.Name, member.Username),
         new("display_name", member.DisplayName)
     };
-    if (member.IsAdmin)
-        claims.Add(new Claim(ClaimTypes.Role, "Admin"));
+    if (MemberRoles.IsValid(member.Role) && member.Role != MemberRoles.Member)
+        claims.Add(new Claim(ClaimTypes.Role, MemberRoles.Normalize(member.Role)));
 
     var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
     await context.SignInAsync(

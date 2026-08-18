@@ -70,7 +70,7 @@
             <strong>StockCaster 전문가 방송</strong>
             <span id="broadcastDescription">실시간 차트 분석과 시장 흐름을 전달합니다.</span>
           </div>
-          <button class="follow-button" type="button" disabled>알림 받기 준비 중</button>
+          <button id="scheduleReminderButton" class="follow-button" type="button">방송 알림 켜기</button>
         </div>
       </article>
 
@@ -145,13 +145,17 @@
         <form id="loginForm" class="auth-form">
           <label><span>아이디</span><input id="loginUsername" required autocomplete="username" placeholder="아이디"></label>
           <label><span>비밀번호</span><input id="loginPassword" type="password" required autocomplete="current-password" placeholder="비밀번호"></label>
+          <a class="auth-help-link" href="/forgot-password.html">비밀번호를 잊으셨나요?</a>
           <button class="primary-button" type="submit">로그인</button>
         </form>
 
         <form id="registerForm" class="auth-form hidden">
           <label><span>아이디</span><input id="registerUsername" required minlength="4" maxlength="20" autocomplete="username" placeholder="영문 소문자·숫자 4~20자"></label>
           <label><span>닉네임</span><input id="registerDisplayName" required minlength="2" maxlength="20" autocomplete="nickname" placeholder="채팅에 표시할 이름"></label>
+          <label><span>이메일</span><input id="registerEmail" type="email" required autocomplete="email" placeholder="인증·비밀번호 찾기에 사용"></label>
           <label><span>비밀번호</span><input id="registerPassword" type="password" required minlength="8" autocomplete="new-password" placeholder="영문·숫자 포함 8자 이상"></label>
+          <label class="consent-check"><input id="registerTerms" type="checkbox" required><span><a href="/terms.html" target="_blank" rel="noopener">이용약관</a>에 동의합니다.</span></label>
+          <label class="consent-check"><input id="registerPrivacy" type="checkbox" required><span><a href="/privacy.html" target="_blank" rel="noopener">개인정보처리방침</a>에 동의합니다.</span></label>
           <button class="primary-button" type="submit">가입하고 시작하기</button>
         </form>
         <div id="authError" class="form-error hidden" role="alert"></div>
@@ -162,8 +166,10 @@
         <h2 id="accountName">회원</h2>
         <p id="accountUsername">@member</p>
         <div id="accountTier" class="account-tier">무료 회원 · 라이브 시청</div>
+        <button id="resendVerificationButton" class="secondary-button hidden" type="button">인증 이메일 다시 보내기</button>
         <a id="adminLink" class="admin-link hidden" href="/admin">관리자 페이지 열기</a>
         <button id="logoutButton" class="secondary-button" type="button">로그아웃</button>
+        <button id="withdrawButton" class="text-danger-button" type="button">회원 탈퇴</button>
       </div>
     </section>
   </div>

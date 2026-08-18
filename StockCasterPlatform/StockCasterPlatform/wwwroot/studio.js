@@ -8,6 +8,7 @@
   const infoForm = document.getElementById("broadcastInfoForm");
   const infoError = document.getElementById("broadcastInfoError");
   const saveInfoButton = document.getElementById("saveBroadcastInfoButton");
+  const studioAlert = document.getElementById("studioAlert");
 
   const requestJson = async (url, options = {}) => {
     const response = await fetch(url, {
@@ -68,7 +69,7 @@
     if (!response.ok) {
       document.getElementById("rtmpUrl").value = "관리자 로그인 필요";
       document.getElementById("streamKey").value = "관리자 로그인 필요";
-      document.getElementById("studioAuthNotice").textContent = "송출 연결 정보는 운영자에게만 표시됩니다. 상단의 회원·채팅 관리에서 먼저 로그인해 주세요.";
+      document.getElementById("studioAuthNotice").textContent = "송출 연결 정보는 운영자 또는 방송 진행자에게만 표시됩니다. 먼저 권한 계정으로 로그인해 주세요.";
       throw new Error("admin authentication required");
     }
     const config = await response.json();
@@ -128,6 +129,12 @@
       stateOrb.classList.toggle("live", status.isLive);
       stateTitle.textContent = status.isLive ? "LIVE 방송 중" : "방송 대기";
       updateHealth(status);
+      const alertResponse = await fetch("/api/studio/alerts", { cache: "no-store" });
+      if (alertResponse.ok) {
+        const alert = await alertResponse.json();
+        studioAlert.textContent = alert?.message || "";
+        studioAlert.className = `studio-alert ${alert?.state || ""} ${alert?.isActive ? "visible" : "hidden"}`;
+      }
 
       document.getElementById("studioViewerCount").textContent = `${status.viewerCount ?? 0}명`;
       document.getElementById("streamUptime").textContent = formatDuration(status.uptimeSeconds);

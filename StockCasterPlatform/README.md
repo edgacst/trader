@@ -13,6 +13,18 @@ $env:AdminBootstrap__Password = "직접_정한_안전한_비밀번호"
 
 비밀번호는 영문과 숫자를 포함해 8자 이상으로 지정해야 합니다. 환경 변수는 관리자 계정이 아직 없는 첫 실행에서만 필요하며, 실제 비밀번호를 `appsettings.json`이나 Git에 저장하지 마세요.
 
+이메일 인증과 비밀번호 찾기를 운영하려면 다음 SMTP 환경 변수를 설정하고 `Email__RequireVerification=true`로 지정합니다. `Email__PublicBaseUrl`에는 실제 HTTPS 도메인을 입력합니다.
+
+```powershell
+$env:Email__SmtpHost = "smtp.example.com"
+$env:Email__SmtpPort = "587"
+$env:Email__SmtpUser = "noreply@example.com"
+$env:Email__SmtpPassword = "메일_서비스_비밀번호"
+$env:Email__From = "noreply@example.com"
+$env:Email__PublicBaseUrl = "https://your-domain.example"
+$env:Email__RequireVerification = "true"
+```
+
 ## 실행
 
 1. `Start StockCaster Platform.cmd`를 더블 클릭합니다.
@@ -90,6 +102,12 @@ $env:AdminBootstrap__Password = "직접_정한_안전한_비밀번호"
 - SQLite 기반 회원·운영자 데이터 저장과 기존 JSON 자동 이전
 - 무료·프리미엄 회원 등급 및 라이브·다시보기 서버 접근 제어
 - 운영자 비밀번호 변경과 RTMP 송출 보안키 인증·재발급
+- 운영자·방송 진행자·채팅 관리자 권한 분리
+- 로그인 IP/계정별 시도 제한과 15분 자동 차단
+- 이메일 인증·비밀번호 재설정·회원 탈퇴·약관 및 개인정보 동의
+- 채팅 신고 접수·관리자 처리·관리자 활동 로그
+- 방송 상태 이상 감지와 운영자 알림 이메일(Alerts 설정 시)
+- 브라우저 기반 방송 예약 알림
 - WebSocket 실시간 채팅과 최근 300개 메시지 보관
 - 관리자 고정공지·금칙어·슬로우 모드와 서버 도배 방지
 - 회원별 기간·영구 채팅 제한 및 메시지 삭제
@@ -97,7 +115,7 @@ $env:AdminBootstrap__Password = "직접_정한_안전한_비밀번호"
 
 ## 외부 공개 전 필수 작업
 
-현재 설정은 한 컴퓨터 또는 내부 테스트 네트워크에서 검증하기 위한 MVP입니다. 불특정 다수에게 공개하기 전에는 도메인과 HTTPS, 안전한 회원 인증, 방송 키 보호, 방화벽, 동시 접속 부하 시험, 이용약관·개인정보처리방침을 적용해야 합니다.
+현재 설정은 한 컴퓨터 또는 내부 테스트 네트워크에서 검증하기 위한 MVP입니다. 불특정 다수에게 공개하기 전에는 도메인과 HTTPS, SMTP 비밀정보, 방송 키 보호, 방화벽, 녹화 보관 기간, 동시 접속 부하 시험, 이용약관·개인정보처리방침의 법률 검토를 적용해야 합니다.
 
 제작: 에드가씨에스트<br>
 문의: 010-8447-9973
