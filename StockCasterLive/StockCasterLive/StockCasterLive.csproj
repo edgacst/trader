@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -6,23 +6,51 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
-    <AssemblyName>StockCasterLive</AssemblyName>
+    <!-- AssemblyName만 바꾼다 — 실행파일 이름(EdgarCasterLive.exe)과 설치/바로가기에
+         보이는 이름이 여기서 정해진다. RootNamespace와 각 .cs/.xaml 파일의 내부
+         namespace/x:Class는 "StockCasterLive"로 그대로 둔다 — 이 둘은 서로 독립적인
+         설정이라 AssemblyName만 바꿔도 빌드에 전혀 영향이 없고, 내부 코드 전체를
+         건드리는(10개 파일 namespace 일괄 변경) 불필요한 위험을 피할 수 있다. -->
+    <AssemblyName>EdgarCasterLive</AssemblyName>
     <RootNamespace>StockCasterLive</RootNamespace>
-    <Version>0.2.0</Version>
-    <AssemblyVersion>0.2.0.0</AssemblyVersion>
-    <FileVersion>0.2.0.0</FileVersion>
-    <Product>StockCaster Live</Product>
+    <Version>1.1.1</Version>
+    <AssemblyVersion>1.1.1.0</AssemblyVersion>
+    <FileVersion>1.1.1.0</FileVersion>
+    <InformationalVersion>1.1.1</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <Product>EdgarCaster Live</Product>
     <Company>에드가씨에스트</Company>
     <Authors>에드가씨에스트</Authors>
     <Description>증권 차트 실시간 방송 송출 프로그램 · 문의 010-8447-9973</Description>
     <Copyright>Copyright © 2026 에드가씨에스트</Copyright>
+    <!-- 설치 프로그램/작업 표시줄/시작 메뉴에서 exe 자체가 이 아이콘을 쓰도록
+         내장한다. 이전에는 바로가기(.lnk)에서만 아이콘을 따로 지정했었다. -->
+    <ApplicationIcon>icon.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- WASAPI 루프백으로 PC 소리(데스크톱 오디오)를 "스테레오 믹스" 같은 Windows
+         녹음 장치 없이 직접 캡처하기 위해 사용한다. 이 방식은 사운드카드/드라이버
+         종류와 무관하게 항상 현재 기본 재생 장치의 소리를 그대로 가져온다. -->
+    <PackageReference Include="NAudio" Version="2.2.1" />
+  </ItemGroup>
 
   <ItemGroup>
     <Content Include="ffmpeg\ffmpeg.exe" Condition="Exists('ffmpeg\ffmpeg.exe')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
       <TargetPath>ffmpeg\ffmpeg.exe</TargetPath>
+    </Content>
+    <!-- Declares ffmpeg.exe as Per-Monitor-V2 DPI aware via an external manifest.
+         Without this, ffmpeg is DPI-unaware, so on a display scaled above 100%
+         Windows silently rescales the -offset_x/-offset_y/-video_size coordinates
+         it receives for gdigrab screen capture, while this (DPI-aware) app computes
+         those same coordinates in real physical pixels. That mismatch shifts the
+         captured/masked region away from where it visually sits on screen. -->
+    <Content Include="ffmpeg\ffmpeg.exe.manifest" Condition="Exists('ffmpeg\ffmpeg.exe.manifest')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <TargetPath>ffmpeg\ffmpeg.exe.manifest</TargetPath>
     </Content>
   </ItemGroup>
 

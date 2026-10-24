@@ -1,3 +1,6 @@
+using System.Diagnostics;
+using Microsoft.Win32;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -14,6 +17,10 @@ public partial class MainWindow : Window
     private readonly FfmpegStreamingService _streamer = new();
     private readonly DispatcherTimer _previewTimer = new() { Interval = TimeSpan.FromMilliseconds(33) };
     private readonly DispatcherTimer _elapsedTimer = new() { Interval = TimeSpan.FromSeconds(1) };
+    // 방송 인코딩과는 완전히 별개로, 설정 화면의 마이크/PC 소리 막대만을 위한
+    // 레벨 측정기. 방송 중이 아니어도(마이크 테스트 등) 항상 켜 둘 수 있다.
+    private readonly AudioLevelMeter _levelMeter = new();
+    private readonly DispatcherTimer _levelMeterTimer = new() { Interval = TimeSpan.FromMilliseconds(80) };
     private readonly StreamingSettings _settings = StreamingSettings.Load();
     private readonly List<PrivacyMask> _privacyMasks = new();
     private DateTime _broadcastStartedUtc;
@@ -26,12 +33,16 @@ public partial class MainWindow : Window
     private Rectangle? _draftMaskRectangle;
     private bool _savedRegionUnavailable;
 
+    private static string DefaultRecordingFolder => System.IO.Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "StockCaster 녹화");
+
     public MainWindow()
     {
         InitializeComponent();
 
         _previewTimer.Tick += PreviewTimer_Tick;
         _elapsedTimer.Tick += ElapsedTimer_Tick;
+        _levelMeterTimer.Tick += LevelMeterTimer_Tick;
         _streamer.StatusReceived += Streamer_StatusReceived;
         _streamer.StreamEnded += Streamer_StreamEnded;
 
@@ -47,7 +58,139 @@ public partial class MainWindow : Window
         RestoreSavedCaptureLayout();
         await RefreshAudioDevicesAsync();
         _previewTimer.Start();
-        StartRiskNoticeAnimation();
+        UpdateLevelMeterSources();
+        _levelMeterTimer.Start();
+        _ = CheckForUpdatesAsync();
+    }
+
+    private async Task CheckForUpdatesAsync()
+    {
+        Version? currentVersion = typeof(MainWindow).Assembly.GetName().Version;
+        if (currentVersion is null)
+            return;
+
+        AppUpdate? update;
+        try
+        {
+            update = await UpdateService.CheckForUpdateAsync(currentVersion);
+        }
+        catch
+        {
+            // 업데이트 서버에 연결할 수 없어도 앱 실행은 계속한다.
+            return;
+        }
+
+        if (update is null)
+            return;
+
+        MessageBoxResult answer = MessageBox.Show(
+            this,
+            $"새 버전 {update.Version}이 있습니다.\n현재 버전: {currentVersion.ToString(3)}\n\n지금 다운로드하여 설치하시겠습니까?",
+            "EdgarCaster Live 업데이트",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Information);
+        if (answer != MessageBoxResult.Yes)
+            return;
+
+        var progressWindow = new Window
+        {
+            Title = "업데이트 다운로드",
+            Width = 390,
+            Height = 138,
+            ResizeMode = ResizeMode.NoResize,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Owner = this,
+            ShowInTaskbar = false,
+            Background = Brushes.White,
+            Content = new StackPanel
+            {
+                Margin = new Thickness(24),
+                VerticalAlignment = VerticalAlignment.Center,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = $"버전 {update.Version} 설치 파일을 다운로드하고 있습니다.",
+                        FontSize = 13,
+                        Foreground = new SolidColorBrush(Color.FromRgb(36, 48, 69))
+                    },
+                    new ProgressBar
+                    {
+                        Height = 8,
+                        Margin = new Thickness(0, 16, 0, 0),
+                        IsIndeterminate = true
+                    }
+                }
+            }
+        };
+        progressWindow.Show();
+
+        try
+        {
+            string installerPath = await UpdateService.DownloadInstallerAsync(update);
+            progressWindow.Close();
+            if (Process.Start(new ProcessStartInfo
+            {
+                FileName = installerPath,
+                UseShellExecute = true
+            }) is null)
+            {
+                throw new InvalidOperationException("설치 프로그램을 실행하지 못했습니다.");
+            }
+            Close();
+        }
+        catch (Exception ex)
+        {
+            progressWindow.Close();
+            MessageBox.Show(
+                this,
+                $"업데이트 파일을 다운로드하거나 실행하지 못했습니다.\n인터넷 연결을 확인한 뒤 다시 시도해 주세요.\n\n{ex.Message}",
+                "업데이트 오류",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+    }
+
+    // 마이크 체크박스/장치 선택, PC 소리 체크박스가 바뀔 때마다 호출해 레벨
+    // 측정기가 지금 UI 상태와 같은 장치/소스를 듣고 있도록 맞춘다.
+    private void UpdateLevelMeterSources()
+    {
+        // UseMicCheck는 XAML에 IsChecked="True"로 적혀 있어서, InitializeComponent()가
+        // 이 체크박스까지만 읽은 시점에 Checked 이벤트가 곧바로(동기적으로) 발생한다.
+        // 그때는 아래쪽에 선언된 AudioDeviceCombo/UseSecondaryAudioCheck 필드가 아직
+        // XAML 파서에 의해 연결되기 전이라 null이므로, 여기서 먼저 걸러낸다. 진짜 초기
+        // 동기화는 MainWindow_Loaded에서 한 번 더 호출되는 UpdateLevelMeterSources()가
+        // 맡는다.
+        if (UseMicCheck is null || AudioDeviceCombo is null || UseSecondaryAudioCheck is null)
+            return;
+
+        string? micName = UseMicCheck.IsChecked == true
+            ? (AudioDeviceCombo.SelectedItem as AudioDevice)?.DisplayName
+            : null;
+        _levelMeter.SetMicDevice(micName);
+        _levelMeter.SetSystemAudioEnabled(UseSecondaryAudioCheck.IsChecked == true);
+    }
+
+    private void AudioDeviceCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        => UpdateLevelMeterSources();
+
+    private void UseSecondaryAudioCheck_Changed(object sender, RoutedEventArgs e)
+        => UpdateLevelMeterSources();
+
+    // 80ms마다 마이크/PC 소리 막대를 갱신한다. 원시 피크값(선형 0~1)은 보통 말소리
+    // 정도로는 매우 작게 나와서(예: 0.05~0.2) 막대가 거의 안 보이므로, 제곱근으로
+    // 완만하게 키워 보여준다(사람이 느끼는 음량에 더 가까운 곡선).
+    private void LevelMeterTimer_Tick(object? sender, EventArgs e)
+    {
+        UpdateLevelBar(MicLevelTrack, MicLevelFill, _levelMeter.ReadMicLevel());
+        UpdateLevelBar(SystemLevelTrack, SystemLevelFill, _levelMeter.ReadSystemLevel());
+    }
+
+    private static void UpdateLevelBar(FrameworkElement track, FrameworkElement fill, float rawLevel)
+    {
+        float level = (float)Math.Sqrt(Math.Clamp(rawLevel, 0f, 1f));
+        double trackWidth = track.ActualWidth;
+        fill.Width = trackWidth > 0 ? trackWidth * level : 0;
     }
 
     private void UpgradeQualityProfile()
@@ -69,34 +212,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private void RiskTickerViewport_SizeChanged(object sender, SizeChangedEventArgs e)
-    {
-        if (IsLoaded)
-            StartRiskNoticeAnimation();
-    }
-
-    private void StartRiskNoticeAnimation()
-    {
-        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
-        {
-            double viewportWidth = RiskTickerViewport.ActualWidth;
-            RiskNoticeText.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-            double textWidth = RiskNoticeText.DesiredSize.Width;
-            if (viewportWidth <= 0 || textWidth <= 0 || RiskNoticeText.RenderTransform is not TranslateTransform transform)
-                return;
-
-            double travelDistance = viewportWidth + textWidth;
-            var animation = new DoubleAnimation
-            {
-                From = viewportWidth,
-                To = -textWidth,
-                Duration = TimeSpan.FromSeconds(Math.Max(12, travelDistance / 72d)),
-                RepeatBehavior = RepeatBehavior.Forever
-            };
-            transform.BeginAnimation(TranslateTransform.XProperty, animation, HandoffBehavior.SnapshotAndReplace);
-        });
-    }
-
     private void ApplySavedSettings()
     {
         ServerUrlBox.Text = string.IsNullOrWhiteSpace(_settings.ServerUrl) ? "rtmp://" : _settings.ServerUrl;
@@ -105,8 +220,18 @@ public partial class MainWindow : Window
             StreamKeyBox.Password = _settings.StreamKey;
 
         ResolutionCombo.SelectedIndex = _settings.OutputHeight == 1080 ? 1 : 0;
-        FrameRateCombo.SelectedIndex = _settings.FrameRate == 60 ? 1 : 0;
+        FrameRateCombo.SelectedIndex = _settings.FrameRate switch
+        {
+            24 => 0,
+            60 => 2,
+            _ => 1
+        };
         UseMicCheck.IsChecked = _settings.UseMicrophone;
+        UseSecondaryAudioCheck.IsChecked = _settings.UseSecondaryAudio;
+
+        RecordingFolderBox.Text = string.IsNullOrWhiteSpace(_settings.RecordingFolderPath)
+            ? DefaultRecordingFolder
+            : _settings.RecordingFolderPath;
 
         if (_settings.SavedCaptureRegion is CaptureRegion savedRegion)
         {
@@ -131,15 +256,22 @@ public partial class MainWindow : Window
     {
         if (_customRegionSource is not null)
         {
-            WindowCombo.SelectedItem = _customRegionSource;
-            _privacyMasks.Clear();
-            foreach (PrivacyMask mask in _settings.SavedPrivacyMasks ?? new List<PrivacyMask>())
+            // 일반적인 경우 모자이크는 이미 RefreshWindows → WindowCombo_SelectionChanged 경로에서
+            // SavedMaskSourceKey로 자동 복원되었다. SavedMaskSourceKey가 없는 이전 버전 설정 파일을
+            // 열었을 때만(그리고 이 실행에서 지정 영역이 선택되어 있을 때만) 위치 기준으로 한 번 더
+            // 복원을 시도해 기존 사용자의 모자이크가 사라지지 않게 한다.
+            if (WindowCombo.SelectedItem == _customRegionSource && _privacyMasks.Count == 0)
             {
-                if (IsValidPrivacyMask(mask))
-                    _privacyMasks.Add(mask);
+                foreach (PrivacyMask mask in _settings.SavedPrivacyMasks ?? new List<PrivacyMask>())
+                {
+                    if (IsValidPrivacyMask(mask))
+                        _privacyMasks.Add(mask);
+                }
+
+                if (_privacyMasks.Count > 0)
+                    RenderPrivacyMasks();
             }
 
-            RenderPrivacyMasks();
             CaptureRegion region = _customRegionSource.Region!;
             SetStatus("저장된 방송 영역을 불러왔습니다",
                 $"크기 {region.Width} × {region.Height}  ·  민감정보 모자이크 {_privacyMasks.Count}개", true);
@@ -163,7 +295,13 @@ public partial class MainWindow : Window
         WindowCombo.ItemsSource = windows;
         WindowCombo.SelectedItem = customRegionWasSelected
             ? _customRegionSource
-            : windows.FirstOrDefault(window => window.Region is null && window.Handle == selectedHandle);
+            : windows.FirstOrDefault(window => window.Region is null && window.Handle == selectedHandle)
+              // 앱을 새로 시작한 직후에는 창 핸들이 이전 실행과 달라서 위 매칭이 항상 실패한다.
+              // 이전에 민감정보 모자이크를 저장해 둔 창과 같은 창(프로세스명+제목)이 지금도 열려 있으면
+              // 자동으로 다시 선택해서 모자이크가 함께 복원되도록 한다.
+              ?? (selectedSource is null && !string.IsNullOrEmpty(_settings.SavedMaskSourceKey)
+                  ? windows.FirstOrDefault(window => ComputeSourceKey(window) == _settings.SavedMaskSourceKey)
+                  : null);
 
         if (WindowCombo.SelectedItem is null && windows.Count > 0)
             WindowCombo.SelectedIndex = 0;
@@ -178,16 +316,21 @@ public partial class MainWindow : Window
 
     private async Task RefreshAudioDevicesAsync()
     {
-        string? previousName = (AudioDeviceCombo.SelectedItem as AudioDevice)?.DisplayName ?? _settings.AudioDeviceName;
+        string? previousMicName = (AudioDeviceCombo.SelectedItem as AudioDevice)?.DisplayName ?? _settings.AudioDeviceName;
         AudioDeviceCombo.IsEnabled = false;
 
         try
         {
             var devices = await Task.Run(_streamer.ListAudioDevices);
+
             AudioDeviceCombo.ItemsSource = devices;
-            AudioDeviceCombo.SelectedItem = devices.FirstOrDefault(device => device.DisplayName == previousName);
+            AudioDeviceCombo.SelectedItem = devices.FirstOrDefault(device => device.DisplayName == previousMicName);
             if (AudioDeviceCombo.SelectedItem is null && devices.Count > 0)
                 AudioDeviceCombo.SelectedIndex = 0;
+
+            // PC 소리는 더 이상 이 목록(dshow 장치)에서 고르지 않는다 — WASAPI 루프백으로
+            // 기본 재생 장치의 소리를 직접 캡처하므로 "스테레오 믹스" 같은 녹음 장치가
+            // 목록에 있을 필요가 없다. (SystemAudioCapture 참고)
 
             if (devices.Count == 0 && UseMicCheck.IsChecked == true)
                 SetStatus("마이크 장치를 찾지 못했습니다", "장치를 연결한 뒤 새로고침해 주세요.", false);
@@ -199,6 +342,7 @@ public partial class MainWindow : Window
         finally
         {
             AudioDeviceCombo.IsEnabled = UseMicCheck.IsChecked == true;
+            UpdateLevelMeterSources();
         }
     }
 
@@ -217,9 +361,19 @@ public partial class MainWindow : Window
 
         try
         {
-            BitmapSource? frame = selectedWindow.Region is CaptureRegion region
-                ? WindowCaptureService.CaptureScreenRegion(region, 960, 540)
-                : WindowCaptureService.CaptureWindow(selectedWindow.Handle);
+            // Always preview via the same desktop-region capture the broadcast itself
+            // uses (see FfmpegStreamingService.StartAsync), instead of the previous
+            // PrintWindow-based capture for "select window" mode. PrintWindow renders
+            // a window's content directly and can disagree with what ffmpeg's screen
+            // capture actually sends to viewers (bounds, occlusion), which let a
+            // privacy mask look correctly placed here while missing its target in the
+            // real broadcast. Matching capture methods keeps preview and stream
+            // pixel-aligned, so what's masked here is what's masked live.
+            CaptureRegion? previewRegion = selectedWindow.Region
+                ?? WindowCaptureService.GetWindowRegion(selectedWindow.Handle);
+            BitmapSource? frame = previewRegion is not null
+                ? WindowCaptureService.CaptureScreenRegion(previewRegion, 960, 540)
+                : null;
             if (frame is null || _closing)
                 return;
 
@@ -249,9 +403,7 @@ public partial class MainWindow : Window
         PreviewEmptyPanel.Visibility = WindowCombo.SelectedItem is null ? Visibility.Visible : Visibility.Collapsed;
         if (WindowCombo.SelectedItem is WindowInfo window)
         {
-            string sourceKey = window.Region is CaptureRegion region
-                ? $"region:{region.X}:{region.Y}:{region.Width}:{region.Height}"
-                : $"window:{window.Handle}";
+            string sourceKey = ComputeSourceKey(window);
             if (_maskSourceKey != sourceKey)
             {
                 _maskSourceKey = sourceKey;
@@ -259,11 +411,36 @@ public partial class MainWindow : Window
                 _previewPixelWidth = 0;
                 _previewPixelHeight = 0;
                 PrivacyMaskToggle.IsChecked = false;
+
+                // 이전에 이 창(또는 이 지정 영역)에 대해 저장해 둔 모자이크가 있으면 그대로 복원한다.
+                // 창 선택 모드에서도 복원되도록, 재실행 시 값이 바뀌는 창 핸들 대신
+                // 저장 시점에 함께 기록해 둔 소스 키(프로세스명+제목 또는 영역 좌표)로 비교한다.
+                if (!string.IsNullOrEmpty(sourceKey) && sourceKey == _settings.SavedMaskSourceKey)
+                {
+                    foreach (PrivacyMask mask in _settings.SavedPrivacyMasks ?? new List<PrivacyMask>())
+                    {
+                        if (IsValidPrivacyMask(mask))
+                            _privacyMasks.Add(mask);
+                    }
+                }
+
                 RenderPrivacyMasks();
             }
-            SetStatus("차트 화면이 선택되었습니다", window.DisplayName, true);
+
+            SetStatus("차트 화면이 선택되었습니다",
+                _privacyMasks.Count > 0
+                    ? $"{window.DisplayName}  ·  민감정보 모자이크 {_privacyMasks.Count}개 자동 복원됨"
+                    : window.DisplayName,
+                true);
         }
     }
+
+    // 창 핸들은 앱을 재시작하면 바뀔 수 있으므로 저장/복원용 키로 쓰지 않는다.
+    // 지정 영역은 좌표로, 일반 창은 프로세스명+제목으로 같은 방송 화면인지 식별한다.
+    private static string ComputeSourceKey(WindowInfo window) =>
+        window.Region is CaptureRegion region
+            ? $"region:{region.X}:{region.Y}:{region.Width}:{region.Height}"
+            : $"window:{window.ProcessName}|{window.Title}";
 
     private void PrivacyMaskToggle_Checked(object sender, RoutedEventArgs e)
     {
@@ -459,9 +636,12 @@ public partial class MainWindow : Window
         if (canvasWidth <= 0 || canvasHeight <= 0 || _previewPixelWidth <= 0 || _previewPixelHeight <= 0)
             return Rect.Empty;
 
-        // 실제 방송과 동일하게 중앙을 기준으로 화면을 꽉 채운다.
-        // 캔버스 밖으로 나간 가장자리는 미리보기와 송출 영상에서 모두 잘린다.
-        double scale = Math.Max(canvasWidth / _previewPixelWidth, canvasHeight / _previewPixelHeight);
+        // 실제 방송(ffmpeg)은 캡처한 프레임을 자르지 않고 그대로 내보내므로, 미리보기도
+        // 잘라내지 않고 전체 프레임이 보이도록 중앙 기준으로 여백을 두고 맞춘다(Image의
+        // Stretch="Uniform"과 동일한 계산). Math.Max(꽉 채우고 가장자리를 자름)를 쓰면
+        // 프레임 가장자리가 미리보기에서는 안 보이는데 실제 방송에는 그대로 나가서,
+        // 그 부분의 민감정보를 마스킹할 수 없게 되는 문제가 있었다.
+        double scale = Math.Min(canvasWidth / _previewPixelWidth, canvasHeight / _previewPixelHeight);
         double width = _previewPixelWidth * scale;
         double height = _previewPixelHeight * scale;
         return new Rect((canvasWidth - width) / 2d, (canvasHeight - height) / 2d, width, height);
@@ -517,6 +697,7 @@ public partial class MainWindow : Window
     {
         if (AudioDeviceCombo is not null)
             AudioDeviceCombo.IsEnabled = UseMicCheck.IsChecked == true;
+        UpdateLevelMeterSources();
     }
 
     private void SaveSettingsButton_Click(object sender, RoutedEventArgs e)
@@ -535,13 +716,34 @@ public partial class MainWindow : Window
         _settings.FrameRate = SelectedTag(FrameRateCombo, 30);
         _settings.UseMicrophone = UseMicCheck.IsChecked == true;
         _settings.AudioDeviceName = (AudioDeviceCombo.SelectedItem as AudioDevice)?.DisplayName ?? string.Empty;
+        _settings.UseSecondaryAudio = UseSecondaryAudioCheck.IsChecked == true;
+        _settings.RecordingFolderPath = RecordingFolderBox.Text.Trim();
         UpdateCaptureLayoutSettings();
         _settings.Save();
     }
 
+    private void ChooseRecordingFolderButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Title = "녹화 파일을 저장할 폴더 선택",
+            InitialDirectory = Directory.Exists(RecordingFolderBox.Text) ? RecordingFolderBox.Text : DefaultRecordingFolder
+        };
+
+        if (dialog.ShowDialog(this) == true)
+        {
+            RecordingFolderBox.Text = dialog.FolderName;
+            SaveSettings();
+        }
+    }
+
     private void PersistCaptureLayout()
     {
-        if (WindowCombo.SelectedItem is not WindowInfo { Region: not null })
+        // 예전에는 "사용자 지정 영역"을 선택했을 때만 자동 저장했다. 그래서 특정 창을 선택해
+        // 방송하는 경우(가장 흔한 사용 방식) 모자이크가 메모리에만 남아 있다가 앱을 재시작하면
+        // 조용히 사라졌고, 이를 잊고 방송을 시작하면 모자이크 없이 민감정보가 그대로 노출됐다.
+        // 이제는 창 선택 모드에서도 저장한다.
+        if (WindowCombo.SelectedItem is not WindowInfo)
             return;
 
         try
@@ -557,10 +759,16 @@ public partial class MainWindow : Window
 
     private void UpdateCaptureLayoutSettings()
     {
-        if (WindowCombo.SelectedItem is not WindowInfo { Region: CaptureRegion region })
+        if (WindowCombo.SelectedItem is not WindowInfo window)
             return;
 
-        _settings.SavedCaptureRegion = region;
+        // 지정 영역을 선택한 경우에만 좌표를 갱신한다. 창 선택 모드에서 저장하면서
+        // 이전에 저장해 둔 지정 영역 좌표(SavedCaptureRegion)를 null로 덮어써
+        // 사라지게 만들지 않기 위함이다.
+        if (window.Region is CaptureRegion region)
+            _settings.SavedCaptureRegion = region;
+
+        _settings.SavedMaskSourceKey = ComputeSourceKey(window);
         _settings.SavedPrivacyMasks = _privacyMasks.Where(IsValidPrivacyMask).ToList();
     }
 
@@ -609,6 +817,7 @@ public partial class MainWindow : Window
             OutputHeight = SelectedTag(ResolutionCombo, 1080),
             FrameRate = SelectedTag(FrameRateCombo, 30),
             AudioDevice = audioDevice,
+            CaptureSystemAudio = UseSecondaryAudioCheck.IsChecked == true,
             PrivacyMasks = _privacyMasks.ToList()
         };
 
@@ -630,6 +839,13 @@ public partial class MainWindow : Window
             HeaderStatusDot.Fill = new SolidColorBrush(Color.FromRgb(255, 66, 104));
             HeaderStatusText.Text = "방송 중";
             SetStatus("실시간 방송을 송출하고 있습니다", "방송 종료 버튼을 누르면 안전하게 연결을 종료합니다.", true);
+
+            // 방송이 시작된 뒤에야(RTMP pull 방식이라 서버에 스트림이 이미 올라가
+            // 있어야 함) 녹화를 시작할 수 있으므로, 여기서 비로소 녹화 버튼을 켠다.
+            RecordingStartButton.Visibility = Visibility.Visible;
+            RecordingStartButton.IsEnabled = true;
+            RecordingStopButton.Visibility = Visibility.Collapsed;
+            RecordingStatusText.Text = string.Empty;
         }
         catch (Exception ex)
         {
@@ -643,8 +859,72 @@ public partial class MainWindow : Window
     {
         StopButton.IsEnabled = false;
         SetStatus("방송을 종료하는 중입니다", "서버 연결을 안전하게 닫고 있습니다.", true);
+        bool wasRecording = _streamer.CurrentRecordingFilePath is not null;
         await _streamer.StopAsync();
-        ApplyStoppedUi("방송이 종료되었습니다", "설정을 확인한 뒤 다시 방송을 시작할 수 있습니다.", false);
+        // StopAsync 안에서 방송을 끊은 뒤 녹화 파일을 mp4로 변환까지 마치므로,
+        // 여기서 다시 읽으면 변환에 성공했을 때는 mp4 경로를, 실패했어도 최소한
+        // 원본 .ts 경로를 얻는다.
+        string? recordedFilePath = wasRecording ? _streamer.CurrentRecordingFilePath : null;
+
+        string detail = recordedFilePath is not null
+            ? $"녹화 파일이 저장되었습니다: {recordedFilePath}"
+            : "설정을 확인한 뒤 다시 방송을 시작할 수 있습니다.";
+        ApplyStoppedUi("방송이 종료되었습니다", detail, false);
+    }
+
+    private async void RecordingStartButton_Click(object sender, RoutedEventArgs e)
+    {
+        RecordingStartButton.IsEnabled = false;
+        RecordingStatusText.Text = "녹화를 시작하는 중입니다...";
+
+        string folderPath = string.IsNullOrWhiteSpace(RecordingFolderBox.Text)
+            ? DefaultRecordingFolder
+            : RecordingFolderBox.Text.Trim();
+
+        try
+        {
+            string? recordingFilePath = await _streamer.StartRecordingAsync(folderPath);
+            if (recordingFilePath is not null)
+            {
+                RecordingStartButton.Visibility = Visibility.Collapsed;
+                RecordingStopButton.Visibility = Visibility.Visible;
+                RecordingStopButton.IsEnabled = true;
+                RecordingStatusText.Text = $"녹화 중입니다: {recordingFilePath}";
+            }
+            else
+            {
+                RecordingStatusText.Text = "녹화를 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.";
+                RecordingStartButton.IsEnabled = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            RecordingStatusText.Text = $"녹화를 시작하지 못했습니다: {ex.Message}";
+            RecordingStartButton.IsEnabled = true;
+        }
+    }
+
+    private async void RecordingStopButton_Click(object sender, RoutedEventArgs e)
+    {
+        RecordingStopButton.IsEnabled = false;
+        RecordingStatusText.Text = "녹화를 mp4로 변환하는 중입니다...";
+
+        try
+        {
+            string? savedPath = await _streamer.StopRecordingAsync();
+            RecordingStatusText.Text = savedPath is not null
+                ? $"녹화 파일이 저장되었습니다: {savedPath}"
+                : "녹화가 중지되었습니다.";
+        }
+        finally
+        {
+            RecordingStopButton.Visibility = Visibility.Collapsed;
+            RecordingStopButton.IsEnabled = true;
+            RecordingStartButton.Visibility = Visibility.Visible;
+            // 그 사이 방송 자체가 끝나버렸다면(거의 동시에 방송 종료를 누른 경우)
+            // 녹화도 다시 시작할 수 없으므로 버튼을 비활성 상태로 둔다.
+            RecordingStartButton.IsEnabled = _streamer.IsStreaming;
+        }
     }
 
     private void Streamer_StatusReceived(string status)
@@ -682,6 +962,15 @@ public partial class MainWindow : Window
         HeaderStatusText.Text = "방송 준비";
         SetControlsEnabled(true);
         SetStatus(title, detail, !error);
+
+        // 방송이 끝나면 녹화도 더 이상 켤 수 없다(RTMP pull 방식이라 방송 중일
+        // 때만 가능) — 다음 방송을 시작할 때 다시 활성화된다.
+        RecordingStartButton.Visibility = Visibility.Visible;
+        RecordingStartButton.IsEnabled = false;
+        RecordingStopButton.Visibility = Visibility.Collapsed;
+        // 녹화 저장 경로는 위 detail(본문 상태 메시지)에 이미 포함되어 있으므로,
+        // 녹화 버튼 아래의 보조 텍스트는 비워 중복 표시를 피한다.
+        RecordingStatusText.Text = string.Empty;
     }
 
     private void ElapsedTimer_Tick(object? sender, EventArgs e)
@@ -697,6 +986,7 @@ public partial class MainWindow : Window
         FrameRateCombo.IsEnabled = enabled;
         UseMicCheck.IsEnabled = enabled;
         AudioDeviceCombo.IsEnabled = enabled && UseMicCheck.IsChecked == true;
+        UseSecondaryAudioCheck.IsEnabled = enabled;
         ServerUrlBox.IsEnabled = enabled;
         StreamKeyBox.IsEnabled = enabled;
         RememberKeyCheck.IsEnabled = enabled;
@@ -732,6 +1022,8 @@ public partial class MainWindow : Window
             _closing = true;
             _previewTimer.Stop();
             _elapsedTimer.Stop();
+            _levelMeterTimer.Stop();
+            _levelMeter.Dispose();
             await _streamer.StopAsync();
             Close();
             return;
@@ -739,5 +1031,7 @@ public partial class MainWindow : Window
 
         _previewTimer.Stop();
         _elapsedTimer.Stop();
+        _levelMeterTimer.Stop();
+        _levelMeter.Dispose();
     }
 }

@@ -185,6 +185,23 @@ public static class WindowCaptureService
 
     public static bool IsWindowAvailable(nint handle) => IsWindow(handle) && !IsIconic(handle);
 
+    /// <summary>
+    /// 창 선택 모드(사용자 지정 영역이 아닌 "창 선택")에서 방송 캡처가 미리보기와
+    /// 동일한 좌표계를 쓰도록, 창의 현재 화면상 사각형을 데스크톱 기준 영역으로 반환합니다.
+    /// gdigrab의 hwnd 캡처는 PrintWindow 기반 미리보기와 렌더링 결과가 달라질 수 있어
+    /// (민감정보 모자이크가 실제 송출 화면에서 어긋나는 원인), 항상 이 영역을 통해
+    /// 데스크톱 좌표로 캡처하면 미리보기·모자이크·실제 송출이 같은 픽셀을 기준으로 맞습니다.
+    /// </summary>
+    public static CaptureRegion? GetWindowRegion(nint handle)
+    {
+        if (!IsWindowAvailable(handle) || !GetWindowRect(handle, out Rect rect))
+            return null;
+
+        int width = rect.Right - rect.Left;
+        int height = rect.Bottom - rect.Top;
+        return width > 0 && height > 0 ? new CaptureRegion(rect.Left, rect.Top, width, height) : null;
+    }
+
     public static DesktopCaptureTarget? ResolveDesktopCapture(CaptureRegion region)
     {
         DesktopCaptureTarget? target = null;
