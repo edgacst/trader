@@ -13,10 +13,10 @@
          건드리는(10개 파일 namespace 일괄 변경) 불필요한 위험을 피할 수 있다. -->
     <AssemblyName>EdgarCasterLive</AssemblyName>
     <RootNamespace>StockCasterLive</RootNamespace>
-    <Version>1.1.2</Version>
-    <AssemblyVersion>1.1.2.0</AssemblyVersion>
-    <FileVersion>1.1.2.0</FileVersion>
-    <InformationalVersion>1.1.2</InformationalVersion>
+    <Version>1.1.3</Version>
+    <AssemblyVersion>1.1.3.0</AssemblyVersion>
+    <FileVersion>1.1.3.0</FileVersion>
+    <InformationalVersion>1.1.3</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Product>EdgarCaster Live</Product>
     <Company>에드가씨에스트</Company>

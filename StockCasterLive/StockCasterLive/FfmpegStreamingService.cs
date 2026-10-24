@@ -237,6 +237,8 @@ public sealed class FfmpegStreamingService
             ?? WindowCaptureService.GetWindowRegion(options.SourceWindow.Handle);
         if (effectiveRegion is null)
             throw new InvalidOperationException("선택한 차트 창의 화면 위치를 확인하지 못했습니다. 창을 다시 선택해 주세요.");
+        if (!WindowCaptureService.IsRegionAvailable(effectiveRegion))
+            throw new InvalidOperationException("선택한 방송 영역이 현재 모니터 화면을 벗어났습니다. 차트 창을 모니터 안쪽으로 옮기거나 방송 영역을 다시 지정해 주세요.");
 
         // GPU 데스크톱 복제(ddagrab) 캡처는 항상 GPU→CPU(hwdownload)→GPU(NVENC 업로드) 왕복을
         // 거치는데, 이 하드웨어 조합에서는 그 왕복이 실시간보다 3~5배 느려서(speed=0.2~0.6x)
@@ -252,7 +254,7 @@ public sealed class FfmpegStreamingService
         _stopping = false;
         _starting = true;
         ResetLogFile();
-        AppendLog("INFO", $"captureRegion={effectiveRegion.Width}x{effectiveRegion.Height}, " +
+        AppendLog("INFO", $"captureRegion={effectiveRegion.X},{effectiveRegion.Y} {effectiveRegion.Width}x{effectiveRegion.Height}, " +
             $"desktopDuplication={useDesktopDuplication}, hwEncoder={useHardwareEncoder}, masks={options.PrivacyMasks.Count}, " +
             $"mic={options.AudioDevice is not null}, pcAudio={options.CaptureSystemAudio}");
 

@@ -31,6 +31,10 @@ public static class WindowCaptureService
     private const uint Srccopy = 0x00CC0020;
     private const uint CaptureBlt = 0x40000000;
     private const uint PwRenderFullContent = 0x00000002;
+    private const int SmXVirtualScreen = 76;
+    private const int SmYVirtualScreen = 77;
+    private const int SmCxVirtualScreen = 78;
+    private const int SmCyVirtualScreen = 79;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct Rect
@@ -197,9 +201,26 @@ public static class WindowCaptureService
         if (!IsWindowAvailable(handle) || !GetWindowRect(handle, out Rect rect))
             return null;
 
-        int width = rect.Right - rect.Left;
-        int height = rect.Bottom - rect.Top;
-        return width > 0 && height > 0 ? new CaptureRegion(rect.Left, rect.Top, width, height) : null;
+        // GetWindowRect can include invisible resize borders that sit just outside the
+        // virtual desktop (for example, a maximized window on a monitor to the left).
+        // gdigrab rejects even a one-pixel overflow, so capture only the visible portion.
+        int desktopLeft = GetSystemMetrics(SmXVirtualScreen);
+        int desktopTop = GetSystemMetrics(SmYVirtualScreen);
+        long desktopRight = (long)desktopLeft + GetSystemMetrics(SmCxVirtualScreen);
+        long desktopBottom = (long)desktopTop + GetSystemMetrics(SmCyVirtualScreen);
+
+        long left = Math.Max((long)rect.Left, desktopLeft);
+        long top = Math.Max((long)rect.Top, desktopTop);
+        long right = Math.Min((long)rect.Right, desktopRight);
+        long bottom = Math.Min((long)rect.Bottom, desktopBottom);
+        if (right <= left || bottom <= top)
+            return null;
+
+        return new CaptureRegion(
+            (int)left,
+            (int)top,
+            (int)(right - left),
+            (int)(bottom - top));
     }
 
     public static DesktopCaptureTarget? ResolveDesktopCapture(CaptureRegion region)

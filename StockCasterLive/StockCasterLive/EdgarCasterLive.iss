@@ -1,5 +1,5 @@
 #define MyAppName "EdgarCaster Live"
-#define MyAppVersion "1.1.2"
+#define MyAppVersion "1.1.3"
 #define MyAppExeName "EdgarCasterLive.exe"
 
 [Setup]
@@ -14,12 +14,12 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=lowest
 OutputDir=dist
-OutputBaseFilename=EdgarCasterLive-Setup-1.1.2
+OutputBaseFilename=EdgarCasterLive-Setup-1.1.3
 SetupIconFile=icon.ico
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-VersionInfoVersion=1.1.2.0
+VersionInfoVersion=1.1.3.0
 
 [Tasks]
 Name: "desktopicon"; Description: "바탕화면 바로가기 만들기"; GroupDescription: "추가 바로가기:"; Flags: unchecked
