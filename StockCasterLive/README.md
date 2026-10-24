@@ -35,4 +35,4 @@ dotnet run --project .\StockCasterLive\StockCasterLive.csproj
 
 ## 자동 업데이트 배포
 
-앱은 실행할 때 GitHub 저장소의 최신 공개 릴리스를 확인합니다. 새 버전을 찾으면 사용자가 설치를 선택할 수 있고, 설치 파일을 받은 뒤 설치 프로그램을 실행합니다. 업데이트를 제공하려면 GitHub Release의 태그와 설치 파일 버전을 맞추고, 설치 파일 이름을 `EdgarCasterLive-Setup-버전.exe`로 올려야 합니다. 예를 들어 1.1.1 릴리스에는 `v1.1.1` 태그와 `EdgarCasterLive-Setup-1.1.1.exe` 파일이 필요합니다.
+앱은 실행할 때 GitHub 저장소의 최신 공개 릴리스를 확인합니다. 새 버전을 찾으면 사용자가 설치를 선택할 수 있고, 설치 파일을 받은 뒤 설치 프로그램을 실행합니다. 업데이트를 제공하려면 GitHub Release의 태그와 설치 파일 버전을 맞추고, 설치 파일 이름을 `EdgarCasterLive-Setup-버전.exe`로 올려야 합니다. 예를 들어 1.1.2 릴리스에는 `v1.1.2` 태그와 `EdgarCasterLive-Setup-1.1.2.exe` 파일이 필요합니다.
