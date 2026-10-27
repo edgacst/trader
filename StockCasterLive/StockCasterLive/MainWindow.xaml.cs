@@ -23,6 +23,11 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _levelMeterTimer = new() { Interval = TimeSpan.FromMilliseconds(80) };
     private readonly StreamingSettings _settings = StreamingSettings.Load();
     private readonly List<PrivacyMask> _privacyMasks = new();
+    // 챠트 화면 위에 작게 띄울 오버레이들(예: 호가주문, 평가손익). 아직은 이번 실행
+    // 중에만 메모리에 유지한다 — _privacyMasks처럼 설정 파일에 저장/복원하는 것은
+    // 다음 단계로 미룬다(민감정보 모자이크 저장 로직까지 함께 건드릴 필요가 있어서,
+    // 지금 단계는 "오버레이 합성 자체가 잘 되는지"를 먼저 확인하는 데 집중한다).
+    private readonly List<OverlayRegion> _overlayRegions = new();
     private DateTime _broadcastStartedUtc;
     private bool _closing;
     private string _maskSourceKey = string.Empty;
@@ -39,6 +44,27 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+
+        // 제목 표시줄에 "지금 실행 중인 exe가 실제로 언제 빌드된 것인지"를 그대로 보여준다.
+        // 버전 번호(1.1.4 등)는 여러 번 다시 빌드/설치해도 안 바뀌어서, 사용자가 "이게
+        // 최신 빌드가 맞나?"를 구분할 방법이 없었다 — 설치 프로그램을 잘못된 .iss로
+        // 열었거나, publish가 실패했거나, 예전 설치 파일이 캐시되어 있어도 겉으로는
+        // 똑같이 "1.1.4"으로만 보였다. 실행 파일(exe) 자체의 마지막 수정 시각은 매번의
+        // dotnet publish마다 반드시 달라지므로, 이걸 제목에 붙이면 "방금 만든 설치
+        // 파일로 제대로 교체됐는지"를 화면만 보고 바로 확인할 수 있다.
+        try
+        {
+            string exePath = Environment.ProcessPath ?? System.IO.Path.Combine(AppContext.BaseDirectory, "EdgarCasterLive.exe");
+            if (!string.IsNullOrEmpty(exePath) && File.Exists(exePath))
+            {
+                DateTime buildStamp = File.GetLastWriteTime(exePath);
+                Title = $"{Title}  ·  빌드 {buildStamp:yyyy-MM-dd HH:mm}";
+            }
+        }
+        catch
+        {
+            // 빌드 시각을 못 구해도 앱 실행 자체를 막을 이유는 없다.
+        }
 
         _previewTimer.Tick += PreviewTimer_Tick;
         _elapsedTimer.Tick += ElapsedTimer_Tick;
@@ -390,6 +416,12 @@ public partial class MainWindow : Window
 
             if (_maskDragStart is null)
                 RenderPrivacyMasks();
+
+            // 오버레이 상자도 미리보기 프레임이 바뀔 때마다(특히 창 크기 변경 등으로
+            // 미리보기 영역 좌표가 달라질 때) 같이 다시 그린다. 드래그/크기조절 중에는
+            // RenderOverlayAdorners() 내부에서 스스로 건너뛰므로 여기서는 조건 없이
+            // 불러도 안전하다.
+            RenderOverlayAdorners();
         }
         catch
         {
@@ -691,6 +723,368 @@ public partial class MainWindow : Window
         }
     }
 
+    private void AddOverlayButton_Click(object sender, RoutedEventArgs e)
+    {
+        // 영역 지정(SelectRegionButton_Click)과 동일하게, 실제 살아있는 데스크톱 화면
+        // 위에서 바로 드래그로 자를 영역을 고르게 한다(정지된 스크린샷이 아님).
+        _previewTimer.Stop();
+        Hide();
+
+        CaptureRegion? cropRegion = null;
+        try
+        {
+            var selector = new RegionSelectionWindow();
+            if (selector.ShowDialog() == true && selector.SelectedRegion is CaptureRegion selected)
+                cropRegion = selected;
+        }
+        finally
+        {
+            Show();
+            Activate();
+            _previewTimer.Start();
+        }
+
+        // 드래그가 없었거나(Esc로 취소) 영역이 너무 작았던 경우 — 예전에는 여기서 아무
+        // 안내 없이 조용히 끝나서, 사용자 입장에서는 "캡쳐했는데 아무 반응이 없다"로
+        // 보였다. 왜 멈췄는지 상태 메시지로 분명히 알려준다.
+        if (cropRegion is null)
+        {
+            SetStatus("오버레이 영역 지정이 취소되었습니다",
+                "드래그 없이 창을 닫았거나 선택한 영역이 너무 작습니다. 추가하려는 부분이 전체가 보이도록 드래그한 뒤 다시 '오버레이 추가'를 눌러 주세요.",
+                false);
+            return;
+        }
+
+        try
+        {
+            // 지금 고른 영역의 "한가운데 지점"에 실제로(다른 창에 가려지지 않고) 보이는
+            // 최상위 창이 뭔지 OS에 직접 묻는다. 예전에는 "이 사각형을 포함하는 창들 중
+            // 가장 작은 것"을 골랐는데, 화면에 안 보이는(다른 창 뒤에 숨은) 배경/런처
+            // 창이 우연히 더 작아서 잘못 뽑히는 경우가 있었다 — 그러면 오버레이가 전혀
+            // 다른, 화면에 보이지도 않는 위치의 픽셀을 캡쳐하게 되어 방송에는 아무 것도
+            // 안 나타난다. WindowFromPoint 방식은 항상 실제로 보이는 창을 정확히 찾는다.
+            int centerX = cropRegion.X + cropRegion.Width / 2;
+            int centerY = cropRegion.Y + cropRegion.Height / 2;
+            nint windowHandle = WindowCaptureService.GetTopLevelWindowAt(centerX, centerY);
+            CaptureRegion? containingRegion = windowHandle != 0 ? WindowCaptureService.GetWindowRegion(windowHandle) : null;
+
+            if (windowHandle == 0 || containingRegion is null || containingRegion.Width <= 0 || containingRegion.Height <= 0)
+            {
+                MessageBox.Show(
+                    "지정한 위치에서 창을 찾지 못했습니다.\n그 부분이 화면에 실제로 보이는 상태에서 다시 선택해 주세요.",
+                    "오버레이 추가", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            string windowTitle = WindowCaptureService.GetWindowTitle(windowHandle);
+            if (string.IsNullOrWhiteSpace(windowTitle))
+                windowTitle = "선택한 창";
+
+            double cropX = (cropRegion.X - containingRegion.X) / (double)containingRegion.Width;
+            double cropY = (cropRegion.Y - containingRegion.Y) / (double)containingRegion.Height;
+            double cropWidth = cropRegion.Width / (double)containingRegion.Width;
+            double cropHeight = cropRegion.Height / (double)containingRegion.Height;
+            double aspectRatio = cropRegion.Width / (double)cropRegion.Height;
+
+            // 예전에는 여기서 별도의 "위치 선택" 대화상자(OverlayPlacementWindow)를
+            // 띄워서 확인/취소 버튼으로 위치를 정했다. 사용자가 "OBS처럼 마우스로 바로
+            // 끌어서 놓고 싶다"고 요청해서, 대화상자 없이 일단 오른쪽 위에 기본 크기로
+            // 바로 추가하고, 미리보기 화면 위에 바로 나타나는 파란 상자를 직접 끌어서
+            // 위치/크기를 조절하는 방식으로 바꿨다 (RenderOverlayAdorners 참고).
+            const double defaultWidthFraction = 0.24;
+            double defaultHeightFraction = Math.Clamp(defaultWidthFraction / aspectRatio, 0.02, 0.9);
+            const double margin = 0.02;
+
+            var overlay = new OverlayRegion(
+                windowHandle,
+                windowTitle,
+                cropX, cropY, cropWidth, cropHeight,
+                1 - defaultWidthFraction - margin, margin,
+                defaultWidthFraction, defaultHeightFraction);
+
+            _overlayRegions.Add(overlay);
+            RefreshOverlayListBox();
+            RenderOverlayAdorners();
+            PushOverlaysToStreamer();
+            SetStatus($"오버레이 {_overlayRegions.Count}개 추가됨",
+                $"'{windowTitle}' 화면 일부가 미리보기 오른쪽 위에 추가됐습니다. 파란 상자를 끌어서 위치를, 모서리를 끌어서 크기를 바꿀 수 있습니다.",
+                true);
+        }
+        catch (Exception ex)
+        {
+            // 예상 못한 오류가 나도 최소한 화면에 보이게 한다 — 조용히 아무 일도 없었던
+            // 것처럼 끝나는 게 가장 혼란스러운 상황이다.
+            MessageBox.Show($"오버레이를 추가하는 중 문제가 발생했습니다.\n\n{ex.Message}",
+                "오버레이 추가", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void RemoveOverlayButton_Click(object sender, RoutedEventArgs e)
+    {
+        int index = OverlayListBox.SelectedIndex;
+        if (index < 0 || index >= _overlayRegions.Count)
+        {
+            SetStatus("삭제할 오버레이를 목록에서 먼저 선택해 주세요", string.Empty, false);
+            return;
+        }
+
+        _overlayRegions.RemoveAt(index);
+        RefreshOverlayListBox();
+        RenderOverlayAdorners();
+        PushOverlaysToStreamer();
+    }
+
+    // 오버레이를 추가/삭제하거나 드래그로 옮기거나 크기를 바꿀 때마다 호출한다.
+    // 방송 중이면 현재 목록을 실행 중인 합성기로 전달해 다음 프레임에 반영한다.
+    private void PushOverlaysToStreamer()
+    {
+        if (!_streamer.IsStreaming)
+            return;
+
+        if (_streamer.IsUsingVideoCompositor)
+        {
+            _streamer.UpdateOverlays(_overlayRegions.ToList());
+        }
+        else if (_overlayRegions.Count > 0)
+        {
+            // 합성기 시작에 실패해 gdigrab 경로로 방송 중인 경우에는 화면 구성을
+            // 바꾸려면 방송을 다시 시작해야 한다.
+            SetStatus("화면 합성기를 사용할 수 없습니다",
+                "방송 화면 합성기를 시작하지 못해 오버레이를 시청자 화면에 적용할 수 없습니다. 방송을 종료한 뒤 다시 시작해 주세요.",
+                false);
+        }
+    }
+
+    private void RefreshOverlayListBox()
+    {
+        OverlayListBox.ItemsSource = _overlayRegions
+            .Select((overlay, index) => new OverlayListItem(
+                overlay,
+                $"{index + 1}. {overlay.SourceWindowTitle}  ·  {Math.Round(overlay.Width * 100)}% 크기"))
+            .ToList();
+    }
+
+    private sealed record OverlayListItem(OverlayRegion Region, string Summary);
+
+    // 민감정보 모자이크 캔버스(PrivacyMaskCanvas)와 같은 좌표 변환(GetPreviewImageBounds)을
+    // 그대로 써서, 오버레이 상자도 미리보기 화면 위에 OBS처럼 직접 마우스로 끌어서
+    // 옮기고 모서리로 크기를 조절할 수 있게 한다. OverlayRegion은 불변 record라서
+    // 드래그 중간에는 화면에 보이는 Border의 Canvas.Left/Top/Width/Height만 바꾸고,
+    // 마우스를 놓는 순간에만 `with` 식으로 실제 데이터를 갱신한다.
+    private readonly List<(Border Box, Border Handle)> _overlayAdorners = new();
+    private int _draggingOverlayIndex = -1;
+    private int _resizingOverlayIndex = -1;
+    private Point? _overlayGestureStart;
+    private Point _overlayDragBoxStart;
+    private Size _overlayResizeBoxStart;
+
+    private void RenderOverlayAdorners()
+    {
+        if (OverlayAdornerCanvas is null)
+            return;
+
+        // 드래그/리사이즈 중에는 다시 그리지 않는다 — 진행 중인 손잡이가 캔버스에서
+        // 사라지면 그 제스처가 끊긴다.
+        if (_draggingOverlayIndex >= 0 || _resizingOverlayIndex >= 0)
+            return;
+
+        OverlayAdornerCanvas.Children.Clear();
+        _overlayAdorners.Clear();
+
+        Rect imageBounds = GetPreviewImageBounds();
+        if (imageBounds.IsEmpty)
+            return;
+
+        for (int i = 0; i < _overlayRegions.Count; i++)
+        {
+            OverlayRegion overlay = _overlayRegions[i];
+            double left = imageBounds.Left + overlay.X * imageBounds.Width;
+            double top = imageBounds.Top + overlay.Y * imageBounds.Height;
+            double width = Math.Max(24, overlay.Width * imageBounds.Width);
+            double height = Math.Max(18, overlay.Height * imageBounds.Height);
+
+            var box = new Border
+            {
+                Width = width,
+                Height = height,
+                Background = new SolidColorBrush(Color.FromArgb(90, 47, 111, 237)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(47, 111, 237)),
+                BorderThickness = new Thickness(2),
+                Cursor = Cursors.SizeAll,
+                Tag = i,
+                Child = new TextBlock
+                {
+                    Text = overlay.SourceWindowTitle,
+                    Foreground = Brushes.White,
+                    FontSize = 10,
+                    FontWeight = FontWeights.SemiBold,
+                    Margin = new Thickness(4, 2, 4, 2),
+                    TextTrimming = TextTrimming.CharacterEllipsis
+                }
+            };
+            box.MouseLeftButtonDown += OverlayBox_MouseLeftButtonDown;
+            box.MouseMove += OverlayBox_MouseMove;
+            box.MouseLeftButtonUp += OverlayBox_MouseLeftButtonUp;
+            Canvas.SetLeft(box, left);
+            Canvas.SetTop(box, top);
+
+            var handle = new Border
+            {
+                Width = 12,
+                Height = 12,
+                Background = new SolidColorBrush(Color.FromRgb(47, 111, 237)),
+                BorderBrush = Brushes.White,
+                BorderThickness = new Thickness(1),
+                Cursor = Cursors.SizeNWSE,
+                Tag = i
+            };
+            handle.MouseLeftButtonDown += OverlayHandle_MouseLeftButtonDown;
+            handle.MouseMove += OverlayHandle_MouseMove;
+            handle.MouseLeftButtonUp += OverlayHandle_MouseLeftButtonUp;
+            Canvas.SetLeft(handle, left + width - 8);
+            Canvas.SetTop(handle, top + height - 8);
+
+            OverlayAdornerCanvas.Children.Add(box);
+            OverlayAdornerCanvas.Children.Add(handle);
+            _overlayAdorners.Add((box, handle));
+        }
+    }
+
+    private void OverlayBox_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not Border box || box.Tag is not int index)
+            return;
+
+        _draggingOverlayIndex = index;
+        _overlayGestureStart = e.GetPosition(OverlayAdornerCanvas);
+        _overlayDragBoxStart = new Point(Canvas.GetLeft(box), Canvas.GetTop(box));
+        box.CaptureMouse();
+        e.Handled = true;
+    }
+
+    private void OverlayBox_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (_draggingOverlayIndex < 0 || _overlayGestureStart is null || e.LeftButton != MouseButtonState.Pressed)
+            return;
+        if (sender is not Border box)
+            return;
+
+        Rect imageBounds = GetPreviewImageBounds();
+        if (imageBounds.IsEmpty)
+            return;
+
+        Point current = e.GetPosition(OverlayAdornerCanvas);
+        double newLeft = Math.Clamp(_overlayDragBoxStart.X + (current.X - _overlayGestureStart.Value.X),
+            imageBounds.Left, imageBounds.Right - box.Width);
+        double newTop = Math.Clamp(_overlayDragBoxStart.Y + (current.Y - _overlayGestureStart.Value.Y),
+            imageBounds.Top, imageBounds.Bottom - box.Height);
+
+        Canvas.SetLeft(box, newLeft);
+        Canvas.SetTop(box, newTop);
+
+        if (_draggingOverlayIndex < _overlayAdorners.Count)
+        {
+            Border handle = _overlayAdorners[_draggingOverlayIndex].Handle;
+            Canvas.SetLeft(handle, newLeft + box.Width - 8);
+            Canvas.SetTop(handle, newTop + box.Height - 8);
+        }
+    }
+
+    private void OverlayBox_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is Border box)
+            box.ReleaseMouseCapture();
+
+        if (_draggingOverlayIndex >= 0 && _draggingOverlayIndex < _overlayRegions.Count && sender is Border movedBox)
+        {
+            Rect imageBounds = GetPreviewImageBounds();
+            if (!imageBounds.IsEmpty)
+            {
+                double left = Canvas.GetLeft(movedBox);
+                double top = Canvas.GetTop(movedBox);
+                OverlayRegion current = _overlayRegions[_draggingOverlayIndex];
+                _overlayRegions[_draggingOverlayIndex] = current with
+                {
+                    X = Math.Clamp((left - imageBounds.Left) / imageBounds.Width, 0, 1),
+                    Y = Math.Clamp((top - imageBounds.Top) / imageBounds.Height, 0, 1)
+                };
+                RefreshOverlayListBox();
+                PushOverlaysToStreamer();
+            }
+        }
+
+        _draggingOverlayIndex = -1;
+        _overlayGestureStart = null;
+    }
+
+    private void OverlayHandle_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not Border handle || handle.Tag is not int index || index >= _overlayAdorners.Count)
+            return;
+
+        _resizingOverlayIndex = index;
+        _overlayGestureStart = e.GetPosition(OverlayAdornerCanvas);
+        Border box = _overlayAdorners[index].Box;
+        _overlayResizeBoxStart = new Size(box.Width, box.Height);
+        handle.CaptureMouse();
+        e.Handled = true;
+    }
+
+    private void OverlayHandle_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (_resizingOverlayIndex < 0 || _overlayGestureStart is null || e.LeftButton != MouseButtonState.Pressed)
+            return;
+        if (_resizingOverlayIndex >= _overlayAdorners.Count)
+            return;
+
+        Rect imageBounds = GetPreviewImageBounds();
+        if (imageBounds.IsEmpty)
+            return;
+
+        (Border box, Border handle) = _overlayAdorners[_resizingOverlayIndex];
+        Point current = e.GetPosition(OverlayAdornerCanvas);
+        double left = Canvas.GetLeft(box);
+        double top = Canvas.GetTop(box);
+        double newWidth = Math.Clamp(_overlayResizeBoxStart.Width + (current.X - _overlayGestureStart.Value.X),
+            16, imageBounds.Right - left);
+        double newHeight = Math.Clamp(_overlayResizeBoxStart.Height + (current.Y - _overlayGestureStart.Value.Y),
+            16, imageBounds.Bottom - top);
+
+        box.Width = newWidth;
+        box.Height = newHeight;
+        Canvas.SetLeft(handle, left + newWidth - 8);
+        Canvas.SetTop(handle, top + newHeight - 8);
+    }
+
+    private void OverlayHandle_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is Border handle)
+            handle.ReleaseMouseCapture();
+
+        if (_resizingOverlayIndex >= 0 && _resizingOverlayIndex < _overlayRegions.Count &&
+            _resizingOverlayIndex < _overlayAdorners.Count)
+        {
+            Rect imageBounds = GetPreviewImageBounds();
+            if (!imageBounds.IsEmpty)
+            {
+                Border box = _overlayAdorners[_resizingOverlayIndex].Box;
+                OverlayRegion current = _overlayRegions[_resizingOverlayIndex];
+                _overlayRegions[_resizingOverlayIndex] = current with
+                {
+                    Width = Math.Clamp(box.Width / imageBounds.Width, 0.01, 1),
+                    Height = Math.Clamp(box.Height / imageBounds.Height, 0.01, 1)
+                };
+                RefreshOverlayListBox();
+                PushOverlaysToStreamer();
+            }
+        }
+
+        _resizingOverlayIndex = -1;
+        _overlayGestureStart = null;
+    }
+
+    private void OverlayAdornerCanvas_SizeChanged(object sender, SizeChangedEventArgs e) => RenderOverlayAdorners();
+
     private async void RefreshAudioButton_Click(object sender, RoutedEventArgs e) => await RefreshAudioDevicesAsync();
 
     private void UseMicCheck_Changed(object sender, RoutedEventArgs e)
@@ -818,7 +1212,8 @@ public partial class MainWindow : Window
             FrameRate = SelectedTag(FrameRateCombo, 30),
             AudioDevice = audioDevice,
             CaptureSystemAudio = UseSecondaryAudioCheck.IsChecked == true,
-            PrivacyMasks = _privacyMasks.ToList()
+            PrivacyMasks = _privacyMasks.ToList(),
+            OverlayRegions = _overlayRegions.ToList()
         };
 
         PrivacyMaskToggle.IsChecked = false;

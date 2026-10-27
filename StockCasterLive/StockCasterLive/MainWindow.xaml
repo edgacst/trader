@@ -1,7 +1,7 @@
 <Window x:Class="StockCasterLive.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="EdgarCaster Live 1.1.3"
+        Title="EdgarCaster Live 1.1.4"
         Width="1140" Height="740"
         MinWidth="980" MinHeight="660"
         WindowStartupLocation="CenterScreen"
@@ -209,7 +209,7 @@
                                      VerticalAlignment="Top" Margin="0,7,7,0"/>
                         </Grid>
                     </Border>
-                    <TextBlock Text="EdgarCaster Live 1.1.3" Foreground="White" FontSize="18" FontWeight="Bold"
+                    <TextBlock Text="EdgarCaster Live 1.1.4" Foreground="White" FontSize="18" FontWeight="Bold"
                                Margin="13,0,0,0" VerticalAlignment="Center"/>
                 </StackPanel>
                 <Border Grid.Column="1" Padding="12,6" CornerRadius="15" Background="#1BFFFFFF"
@@ -268,6 +268,13 @@
                                         MouseMove="PrivacyMaskCanvas_MouseMove"
                                         MouseLeftButtonUp="PrivacyMaskCanvas_MouseLeftButtonUp"
                                         SizeChanged="PrivacyMaskCanvas_SizeChanged"/>
+                                <!-- 오버레이 위치를 OBS처럼 미리보기 위에서 직접 마우스로 끌어서 잡을 수 있게
+                                     하는 레이어. Background를 일부러 비워 둔다(투명이 아니라 "없음") —
+                                     그래야 상자가 없는 빈 곳을 클릭했을 때는 이 캔버스가 클릭을 가로채지
+                                     않고 그대로 통과시켜서 민감정보 모자이크 편집 등 다른 조작을 막지
+                                     않는다. 상자(각 오버레이)와 크기 조절 손잡이만 각자 직접 클릭/드래그를
+                                     받는다. -->
+                                <Canvas x:Name="OverlayAdornerCanvas" Panel.ZIndex="4" SizeChanged="OverlayAdornerCanvas_SizeChanged"/>
                                 <StackPanel x:Name="PreviewEmptyPanel" HorizontalAlignment="Center" VerticalAlignment="Center">
                                     <Border Width="66" Height="54" CornerRadius="12" BorderBrush="#536078" BorderThickness="1.5" Background="#172033">
                                         <Grid>
@@ -345,6 +352,30 @@
                             <Button Grid.Column="1" x:Name="ClearPrivacyMasksButton" Content="전체 삭제"
                                     Style="{StaticResource SecondaryButton}" Height="32" Padding="6,0"
                                     Click="ClearPrivacyMasksButton_Click"/>
+                        </Grid>
+
+                        <Grid Margin="0,7,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="90"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="오버레이로 추가 표시" Style="{StaticResource Label}" Margin="0" VerticalAlignment="Center"/>
+                            <Button Grid.Column="1" x:Name="AddOverlayButton" Content="오버레이 추가" Padding="4,0"
+                                    Style="{StaticResource SecondaryButton}" Click="AddOverlayButton_Click"/>
+                        </Grid>
+                        <TextBlock Text="챠트 화면 위에 다른 창의 일부를 작게 띄워 보여줍니다. 그 창을 옮기거나 크기를 바꿔도 오버레이가 따라갑니다."
+                                   Foreground="{StaticResource Muted}" FontSize="9.5" Margin="0,2,0,6" TextWrapping="Wrap"/>
+                        <ListBox x:Name="OverlayListBox" Style="{StaticResource Input}" Height="72" Padding="4"
+                                 DisplayMemberPath="Summary"/>
+                        <Grid Margin="0,6,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="74"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="목록에서 선택한 뒤 삭제할 수 있습니다" FontSize="9.5"
+                                       Foreground="{StaticResource Muted}" VerticalAlignment="Center"/>
+                            <Button Grid.Column="1" x:Name="RemoveOverlayButton" Content="삭제" Padding="6,0"
+                                    Style="{StaticResource SecondaryButton}" Height="28" Click="RemoveOverlayButton_Click"/>
                         </Grid>
 
                         <Separator Background="{StaticResource Line}" Margin="0,8,0,7"/>
@@ -456,7 +487,7 @@
         </Grid>
 
         <Grid Grid.Row="2" Margin="22,0">
-            <TextBlock Text="EdgarCaster Live 1.1.3 · 에드가씨에스트" Foreground="#8893A6" FontSize="10" VerticalAlignment="Center"/>
+            <TextBlock Text="EdgarCaster Live 1.1.4 · 에드가씨에스트" Foreground="#8893A6" FontSize="10" VerticalAlignment="Center"/>
             <TextBlock Text="문의 010-8447-9973" Foreground="#8893A6" FontSize="10" HorizontalAlignment="Right" VerticalAlignment="Center"/>
         </Grid>
     </Grid>

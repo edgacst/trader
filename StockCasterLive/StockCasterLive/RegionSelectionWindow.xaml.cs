@@ -51,7 +51,10 @@ public partial class RegionSelectionWindow : Window
         double width = Math.Abs(endPoint.X - _startPoint.X);
         double height = Math.Abs(endPoint.Y - _startPoint.Y);
 
-        if (width < 40 || height < 40)
+        // 오버레이 원본(예: 손익 숫자 한 줄)처럼 아주 작은 영역도 지정할 수 있어야 하므로
+        // 최소 크기를 넉넉하게 낮춰 둔다(예전 40px는 메인 방송 영역 기준으로는 적당했지만,
+        // 작은 텍스트 한 줄을 오버레이로 자르려는 경우에는 너무 커서 선택이 조용히 취소되곤 했다).
+        if (width < 8 || height < 8)
         {
             DialogResult = false;
             return;

@@ -128,6 +128,54 @@ public static class WindowCaptureService
     [DllImport("gdi32.dll")]
     private static extern int SetStretchBltMode(nint hdc, int mode);
 
+    [DllImport("user32.dll")]
+    private static extern nint WindowFromPoint(NativePoint point);
+
+    [DllImport("user32.dll")]
+    private static extern nint GetAncestor(nint hWnd, uint flags);
+
+    // System.Windows.Point(이 파일에서 using System.Windows;로 이미 들어와 있음)와
+    // 헷갈리지 않도록, WinAPI용 정수 좌표 구조체는 이름을 따로 둔다.
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint
+    {
+        public int X;
+        public int Y;
+    }
+
+    private const uint GaRoot = 2;
+
+    /// <summary>
+    /// 데스크톱 절대 좌표의 한 점에서 "실제로 화면에 보이는(맨 위에 있는)" 최상위 창의
+    /// 핸들을 돌려준다. 오버레이 원본 창을 고를 때 예전에는 "이 사각형을 포함하는 창들
+    /// 중 가장 작은 것"을 골랐는데, 화면에 안 보이는(다른 창 뒤에 가려진) 배경/런처
+    /// 창이 우연히 더 작은 경우 그게 잘못 뽑힐 수 있었다. OS에 "여기 뭐가 보이니"라고
+    /// 직접 묻는 이 방식이 항상 정확하다. WindowFromPoint는 자식 컨트롤의 핸들을 줄 수
+    /// 있으므로 GetAncestor(GA_ROOT)로 그 최상위(top-level) 창까지 올라간다.
+    /// </summary>
+    public static nint GetTopLevelWindowAt(int x, int y)
+    {
+        nint hwnd = WindowFromPoint(new NativePoint { X = x, Y = y });
+        if (hwnd == 0)
+            return 0;
+
+        nint root = GetAncestor(hwnd, GaRoot);
+        return root != 0 ? root : hwnd;
+    }
+
+    /// <summary>창 핸들로 제목 텍스트만 조회한다(GetCapturableWindows의 160×100 최소 크기
+    /// 필터를 거치지 않은, 더 작은 창에도 쓸 수 있도록 별도로 뺐다).</summary>
+    public static string GetWindowTitle(nint handle)
+    {
+        int length = GetWindowTextLength(handle);
+        if (length <= 0)
+            return string.Empty;
+
+        var builder = new StringBuilder(length + 1);
+        GetWindowText(handle, builder, builder.Capacity);
+        return builder.ToString().Trim();
+    }
+
     public static List<WindowInfo> GetCapturableWindows()
     {
         var result = new List<WindowInfo>();

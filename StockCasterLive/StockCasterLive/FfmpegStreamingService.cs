@@ -26,6 +26,9 @@ public sealed class StreamingOptions
     // 필요 없다 — Apro/SOOP처럼 장치 선택 없이 항상 동작한다.
     public bool CaptureSystemAudio { get; init; }
     public IReadOnlyList<PrivacyMask> PrivacyMasks { get; init; } = Array.Empty<PrivacyMask>();
+    // 메인 화면(SourceWindow) 위에 겹쳐 보일 추가 캡처 영역들.
+    // 방송 중에도 오버레이를 추가할 수 있도록 송출 합성기는 항상 실행하고 목록만 갱신한다.
+    public IReadOnlyList<OverlayRegion> OverlayRegions { get; init; } = Array.Empty<OverlayRegion>();
     // 비어 있지 않으면 방송과 동시에 이 폴더에 녹화 파일도 저장한다(ffmpeg tee 먹서로
     // 같은 인코딩 결과를 방송 서버와 로컬 파일에 동시에 내보낸다 — 인코딩을 두 번 하지
     // 않아 PC 부하가 거의 늘지 않는다).
@@ -43,6 +46,9 @@ public sealed class FfmpegStreamingService
     private readonly Queue<string> _recordingErrors = new();
     private SystemAudioCapture? _systemAudioCapture;
     private AudioMixer? _audioMixer;
+    // 방송 중 오버레이 변경을 지원하기 위해 항상 생성된다 — 메인 화면과 오버레이를
+    // 미리 합성해 ffmpeg에 raw 프레임 하나로 넘긴다.
+    private VideoCompositor? _videoCompositor;
     private bool _stopping;
     private bool _starting;
     private bool? _nvencAvailable;
@@ -109,6 +115,17 @@ public sealed class FfmpegStreamingService
                 return _process is { HasExited: false };
         }
     }
+
+    // 방송 중에 오버레이를 추가/삭제하거나 드래그로 옮기거나 크기를 바꿀 때
+    // MainWindow가 호출한다. 실행 중인 합성기에 새 목록을 전달한다.
+    public void UpdateOverlays(IReadOnlyList<OverlayRegion> overlays)
+    {
+        _videoCompositor?.UpdateOverlays(overlays);
+    }
+
+    // 지금 방송이 VideoCompositor 송출 경로로 동작 중인지 확인한다.
+    // 합성기를 시작하지 못해 gdigrab으로 대체된 경우에만 false다.
+    public bool IsUsingVideoCompositor => _videoCompositor is not null;
 
     // 현재(또는 방금 끝난) 방송의 녹화 파일 전체 경로. 녹화를 켜지 않았거나 녹화 폴더
     // 준비에 실패해 방송만 진행 중이면 null이다. 녹화 중에는 .ts 경로를 가리키고,
@@ -247,6 +264,7 @@ public sealed class FfmpegStreamingService
         // 검증된 gdigrab(CPU) 캡처 경로만 쓰도록 당분간 비활성화한다.
         bool useDesktopDuplication = false;
         DesktopCaptureTarget? desktopCapture = null;
+        bool useVideoCompositor = true;
         string outputUrl = BuildOutputUrl(options.ServerUrl, options.StreamKey);
         _currentOptions = options;
         _secretToRedact = ExtractQueryValue(options.StreamKey, "pass") ?? options.StreamKey;
@@ -256,7 +274,7 @@ public sealed class FfmpegStreamingService
         ResetLogFile();
         AppendLog("INFO", $"captureRegion={effectiveRegion.X},{effectiveRegion.Y} {effectiveRegion.Width}x{effectiveRegion.Height}, " +
             $"desktopDuplication={useDesktopDuplication}, hwEncoder={useHardwareEncoder}, masks={options.PrivacyMasks.Count}, " +
-            $"mic={options.AudioDevice is not null}, pcAudio={options.CaptureSystemAudio}");
+            $"overlays={options.OverlayRegions.Count}, mic={options.AudioDevice is not null}, pcAudio={options.CaptureSystemAudio}");
 
         var startInfo = new ProcessStartInfo
         {
@@ -271,7 +289,42 @@ public sealed class FfmpegStreamingService
 
         Add(startInfo, "-hide_banner", "-loglevel", "info");
 
-        if (!useDesktopDuplication)
+        _videoCompositor?.Dispose();
+        _videoCompositor = null;
+
+        if (useVideoCompositor)
+        {
+            // 메인 화면과 오버레이를 앱 안에서 먼저 합성하고, ffmpeg에는 하나의 rawvideo
+            // 입력만 전달한다. 방송 중 처음 추가한 오버레이도 같은 파이프로 반영된다.
+            VideoCompositor? compositor = null;
+            try
+            {
+                compositor = new VideoCompositor(effectiveRegion, options.OverlayRegions, options.FrameRate);
+                compositor.CompositorWarning += warning => AppendLog("INFO", $"[화면합성] {warning}");
+                compositor.Start();
+                _videoCompositor = compositor;
+            }
+            catch (Exception ex)
+            {
+                compositor?.Dispose();
+                _videoCompositor = null;
+                AppendLog("INFO", $"[화면합성] 오버레이 합성을 시작하지 못해 기존 화면 캡처로 전환합니다: {ex.Message}");
+                useVideoCompositor = false;
+            }
+        }
+
+        if (useVideoCompositor && _videoCompositor is not null)
+        {
+            Add(startInfo,
+                "-thread_queue_size", "1024",
+                "-f", "rawvideo",
+                "-pix_fmt", _videoCompositor.FfmpegPixelFormat,
+                "-video_size", $"{_videoCompositor.Width}x{_videoCompositor.Height}",
+                "-framerate", options.FrameRate.ToString(CultureInfo.InvariantCulture),
+                "-use_wallclock_as_timestamps", "1",
+                "-i", _videoCompositor.PipePath);
+        }
+        else if (!useDesktopDuplication)
         {
             Add(startInfo,
                 "-thread_queue_size", "1024",
@@ -1414,6 +1467,7 @@ public sealed class FfmpegStreamingService
     {
         SystemAudioCapture? systemAudioCapture;
         AudioMixer? audioMixer;
+        VideoCompositor? videoCompositor;
         lock (_sync)
         {
             if (ReferenceEquals(_process, process))
@@ -1429,6 +1483,8 @@ public sealed class FfmpegStreamingService
             _systemAudioCapture = null;
             audioMixer = _audioMixer;
             _audioMixer = null;
+            videoCompositor = _videoCompositor;
+            _videoCompositor = null;
         }
 
         process.ErrorDataReceived -= Process_ErrorDataReceived;
@@ -1436,6 +1492,7 @@ public sealed class FfmpegStreamingService
         process.Dispose();
         systemAudioCapture?.Dispose();
         audioMixer?.Dispose();
+        videoCompositor?.Dispose();
     }
 
     private void CleanupLowLatencyProcess(Process process)
