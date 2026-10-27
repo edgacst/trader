@@ -56,6 +56,23 @@ internal sealed class OverlayWindowCapture : IDisposable
         }
     }
 
+    public static (int Width, int Height)? TryGetCaptureSize(nint windowHandle)
+    {
+        if (!IsSupported || windowHandle == 0)
+            return null;
+
+        try
+        {
+            GraphicsCaptureItem item = CreateCaptureItem(windowHandle);
+            SizeInt32 size = item.Size;
+            return size.Width > 0 && size.Height > 0 ? (size.Width, size.Height) : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     public OverlayWindowCapture(nint windowHandle)
     {
         if (!IsSupported)

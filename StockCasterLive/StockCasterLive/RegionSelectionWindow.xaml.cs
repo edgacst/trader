@@ -1,13 +1,25 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Runtime.InteropServices;
 
 namespace StockCasterLive;
 
 public partial class RegionSelectionWindow : Window
 {
     private Point _startPoint;
+    private NativePoint _startPhysicalPoint;
     private bool _selecting;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint
+    {
+        public int X;
+        public int Y;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool GetPhysicalCursorPos(out NativePoint point);
 
     public CaptureRegion? SelectedRegion { get; private set; }
 
@@ -23,6 +35,9 @@ public partial class RegionSelectionWindow : Window
     private void OverlayCanvas_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         _startPoint = e.GetPosition(OverlayCanvas);
+        _startPhysicalPoint = GetPhysicalCursorPos(out NativePoint physicalPoint)
+            ? physicalPoint
+            : ToPhysicalPoint(PointToScreen(_startPoint));
         _selecting = true;
         GuidePanel.Visibility = Visibility.Collapsed;
         SelectionRectangle.Visibility = Visibility.Visible;
@@ -60,12 +75,13 @@ public partial class RegionSelectionWindow : Window
             return;
         }
 
-        Point physicalTopLeft = PointToScreen(new Point(left, top));
-        Point physicalBottomRight = PointToScreen(new Point(left + width, top + height));
-        int x = (int)Math.Round(Math.Min(physicalTopLeft.X, physicalBottomRight.X));
-        int y = (int)Math.Round(Math.Min(physicalTopLeft.Y, physicalBottomRight.Y));
-        int pixelWidth = Math.Max(2, (int)Math.Round(Math.Abs(physicalBottomRight.X - physicalTopLeft.X)));
-        int pixelHeight = Math.Max(2, (int)Math.Round(Math.Abs(physicalBottomRight.Y - physicalTopLeft.Y)));
+        NativePoint physicalEnd = GetPhysicalCursorPos(out NativePoint cursorPoint)
+            ? cursorPoint
+            : ToPhysicalPoint(PointToScreen(endPoint));
+        int x = Math.Min(_startPhysicalPoint.X, physicalEnd.X);
+        int y = Math.Min(_startPhysicalPoint.Y, physicalEnd.Y);
+        int pixelWidth = Math.Max(2, Math.Abs(physicalEnd.X - _startPhysicalPoint.X));
+        int pixelHeight = Math.Max(2, Math.Abs(physicalEnd.Y - _startPhysicalPoint.Y));
 
         // H.264 인코더가 안정적으로 처리하도록 가로·세로를 짝수 픽셀로 맞춘다.
         pixelWidth -= pixelWidth % 2;
@@ -73,6 +89,12 @@ public partial class RegionSelectionWindow : Window
         SelectedRegion = new CaptureRegion(x, y, pixelWidth, pixelHeight);
         DialogResult = true;
     }
+
+    private static NativePoint ToPhysicalPoint(Point point) => new()
+    {
+        X = (int)Math.Round(point.X),
+        Y = (int)Math.Round(point.Y)
+    };
 
     private void UpdateSelection(Point current)
     {

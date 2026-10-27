@@ -35,6 +35,7 @@ public static class WindowCaptureService
     private const int SmYVirtualScreen = 77;
     private const int SmCxVirtualScreen = 78;
     private const int SmCyVirtualScreen = 79;
+    private const int DwmwaExtendedFrameBounds = 9;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct Rect
@@ -83,6 +84,15 @@ public static class WindowCaptureService
 
     [DllImport("user32.dll")]
     private static extern bool GetWindowRect(nint hWnd, out Rect rect);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetClientRect(nint hWnd, out Rect rect);
+
+    [DllImport("user32.dll")]
+    private static extern bool ClientToScreen(nint hWnd, ref NativePoint point);
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmGetWindowAttribute(nint hWnd, int attribute, out Rect value, int valueSize);
 
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(nint hWnd, out uint processId);
@@ -141,6 +151,53 @@ public static class WindowCaptureService
     {
         public int X;
         public int Y;
+    }
+
+    /// <summary>
+    /// Returns the screen-space rectangle whose dimensions most closely match the actual
+    /// Windows.Graphics.Capture frame. Window bounds, DWM visible bounds, and client bounds
+    /// differ by title bars and invisible resize borders, so using GetWindowRect alone can
+    /// shift a user-selected crop within the captured pixels.
+    /// </summary>
+    public static CaptureRegion? GetWindowCaptureBounds(nint handle, int captureWidth, int captureHeight)
+    {
+        if (!IsWindowAvailable(handle) || captureWidth <= 0 || captureHeight <= 0)
+            return null;
+
+        var candidates = new List<CaptureRegion>();
+        if (DwmGetWindowAttribute(handle, DwmwaExtendedFrameBounds, out Rect frameBounds,
+                Marshal.SizeOf<Rect>()) == 0)
+            AddCandidate(frameBounds);
+
+        if (GetClientRect(handle, out Rect clientRect))
+        {
+            var topLeft = new NativePoint { X = clientRect.Left, Y = clientRect.Top };
+            var bottomRight = new NativePoint { X = clientRect.Right, Y = clientRect.Bottom };
+            if (ClientToScreen(handle, ref topLeft) && ClientToScreen(handle, ref bottomRight))
+                AddCandidate(new Rect
+                {
+                    Left = topLeft.X,
+                    Top = topLeft.Y,
+                    Right = bottomRight.X,
+                    Bottom = bottomRight.Y
+                });
+        }
+
+        if (GetWindowRect(handle, out Rect windowBounds))
+            AddCandidate(windowBounds);
+
+        return candidates
+            .OrderBy(candidate => Math.Abs(Math.Log(candidate.Width / (double)captureWidth)) +
+                                  Math.Abs(Math.Log(candidate.Height / (double)captureHeight)))
+            .FirstOrDefault();
+
+        void AddCandidate(Rect rect)
+        {
+            int width = rect.Right - rect.Left;
+            int height = rect.Bottom - rect.Top;
+            if (width > 0 && height > 0)
+                candidates.Add(new CaptureRegion(rect.Left, rect.Top, width, height));
+        }
     }
 
     private const uint GaRoot = 2;

@@ -46,10 +46,10 @@ public partial class MainWindow : Window
         InitializeComponent();
 
         // 제목 표시줄에 "지금 실행 중인 exe가 실제로 언제 빌드된 것인지"를 그대로 보여준다.
-        // 버전 번호(1.1.4 등)는 여러 번 다시 빌드/설치해도 안 바뀌어서, 사용자가 "이게
+        // 버전 번호는 여러 번 다시 빌드/설치해도 안 바뀌어서, 사용자가 "이게
         // 최신 빌드가 맞나?"를 구분할 방법이 없었다 — 설치 프로그램을 잘못된 .iss로
         // 열었거나, publish가 실패했거나, 예전 설치 파일이 캐시되어 있어도 겉으로는
-        // 똑같이 "1.1.4"으로만 보였다. 실행 파일(exe) 자체의 마지막 수정 시각은 매번의
+        // 똑같은 버전 번호로만 보였다. 실행 파일(exe) 자체의 마지막 수정 시각은 매번의
         // dotnet publish마다 반드시 달라지므로, 이걸 제목에 붙이면 "방금 만든 설치
         // 파일로 제대로 교체됐는지"를 화면만 보고 바로 확인할 수 있다.
         try
@@ -731,11 +731,28 @@ public partial class MainWindow : Window
         Hide();
 
         CaptureRegion? cropRegion = null;
+        nint sourceWindowHandle = 0;
+        CaptureRegion? sourceCaptureBounds = null;
         try
         {
             var selector = new RegionSelectionWindow();
             if (selector.ShowDialog() == true && selector.SelectedRegion is CaptureRegion selected)
+            {
                 cropRegion = selected;
+
+                // 앱을 다시 표시하기 전에 HWND를 확정한다. 창을 앞으로 띄운 뒤
+                // WindowFromPoint를 호출하면 선택한 원본 대신 이 앱 자신이 잡힐 수 있다.
+                int centerX = selected.X + selected.Width / 2;
+                int centerY = selected.Y + selected.Height / 2;
+                sourceWindowHandle = WindowCaptureService.GetTopLevelWindowAt(centerX, centerY);
+                if (sourceWindowHandle != 0)
+                {
+                    (int Width, int Height)? captureSize = OverlayWindowCapture.TryGetCaptureSize(sourceWindowHandle);
+                    sourceCaptureBounds = captureSize is { } size
+                        ? WindowCaptureService.GetWindowCaptureBounds(sourceWindowHandle, size.Width, size.Height)
+                        : WindowCaptureService.GetWindowRegion(sourceWindowHandle);
+                }
+            }
         }
         finally
         {
@@ -757,18 +774,8 @@ public partial class MainWindow : Window
 
         try
         {
-            // 지금 고른 영역의 "한가운데 지점"에 실제로(다른 창에 가려지지 않고) 보이는
-            // 최상위 창이 뭔지 OS에 직접 묻는다. 예전에는 "이 사각형을 포함하는 창들 중
-            // 가장 작은 것"을 골랐는데, 화면에 안 보이는(다른 창 뒤에 숨은) 배경/런처
-            // 창이 우연히 더 작아서 잘못 뽑히는 경우가 있었다 — 그러면 오버레이가 전혀
-            // 다른, 화면에 보이지도 않는 위치의 픽셀을 캡쳐하게 되어 방송에는 아무 것도
-            // 안 나타난다. WindowFromPoint 방식은 항상 실제로 보이는 창을 정확히 찾는다.
-            int centerX = cropRegion.X + cropRegion.Width / 2;
-            int centerY = cropRegion.Y + cropRegion.Height / 2;
-            nint windowHandle = WindowCaptureService.GetTopLevelWindowAt(centerX, centerY);
-            CaptureRegion? containingRegion = windowHandle != 0 ? WindowCaptureService.GetWindowRegion(windowHandle) : null;
-
-            if (windowHandle == 0 || containingRegion is null || containingRegion.Width <= 0 || containingRegion.Height <= 0)
+            if (sourceWindowHandle == 0 || sourceCaptureBounds is null ||
+                sourceCaptureBounds.Width <= 0 || sourceCaptureBounds.Height <= 0)
             {
                 MessageBox.Show(
                     "지정한 위치에서 창을 찾지 못했습니다.\n그 부분이 화면에 실제로 보이는 상태에서 다시 선택해 주세요.",
@@ -776,7 +783,18 @@ public partial class MainWindow : Window
                 return;
             }
 
-            string windowTitle = WindowCaptureService.GetWindowTitle(windowHandle);
+            CaptureRegion containingRegion = sourceCaptureBounds;
+            if (cropRegion.X < containingRegion.X || cropRegion.Y < containingRegion.Y ||
+                (long)cropRegion.X + cropRegion.Width > (long)containingRegion.X + containingRegion.Width ||
+                (long)cropRegion.Y + cropRegion.Height > (long)containingRegion.Y + containingRegion.Height)
+            {
+                MessageBox.Show(
+                    "선택 영역이 실제 창 캡처 범위와 맞지 않습니다. 창의 테두리 안쪽 콘텐츠를 다시 선택해 주세요.",
+                    "오버레이 영역 확인", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            string windowTitle = WindowCaptureService.GetWindowTitle(sourceWindowHandle);
             if (string.IsNullOrWhiteSpace(windowTitle))
                 windowTitle = "선택한 창";
 
@@ -796,7 +814,7 @@ public partial class MainWindow : Window
             const double margin = 0.02;
 
             var overlay = new OverlayRegion(
-                windowHandle,
+                sourceWindowHandle,
                 windowTitle,
                 cropX, cropY, cropWidth, cropHeight,
                 1 - defaultWidthFraction - margin, margin,

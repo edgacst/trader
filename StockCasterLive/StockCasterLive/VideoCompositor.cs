@@ -359,8 +359,7 @@ public sealed class VideoCompositor : IDisposable
             SetStretchBltMode(_memoryDc, HalftoneStretchMode);
             foreach (OverlayRegion overlay in _overlays)
             {
-                CaptureRegion? windowRegion = WindowCaptureService.GetWindowRegion(overlay.SourceWindowHandle);
-                if (windowRegion is null)
+                if (!WindowCaptureService.IsWindowAvailable(overlay.SourceWindowHandle))
                     continue;
 
                 int destX = (int)Math.Round(Math.Clamp(overlay.X, 0, 1) * Width);
@@ -376,8 +375,19 @@ public sealed class VideoCompositor : IDisposable
                     capturedFrame = windowCapture?.GetLatestFrame();
                 }
 
-                int sourceWidth = capturedFrame?.Width ?? windowRegion.Width;
-                int sourceHeight = capturedFrame?.Height ?? windowRegion.Height;
+                // WGC은 다른 창에 가려져 있거나 화면 밖으로 일부 이동한 원본도
+                // HWND 프레임을 제공한다. 화면 좌표 영역이 있을 때만 이 프레임을
+                // 사용하는 식으로 제한하면 해당 경우 오버레이가 통째로 사라진다.
+                CaptureRegion? windowRegion = capturedFrame is null
+                    ? WindowCaptureService.GetWindowRegion(overlay.SourceWindowHandle)
+                    : null;
+                if (capturedFrame is null && windowRegion is null)
+                    continue;
+                if (capturedFrame is null && windowCapture is not null)
+                    continue;
+
+                int sourceWidth = capturedFrame is not null ? capturedFrame.Width : windowRegion!.Width;
+                int sourceHeight = capturedFrame is not null ? capturedFrame.Height : windowRegion!.Height;
                 int cropX = Math.Clamp((int)Math.Round(Math.Clamp(overlay.SourceCropX, 0, 1) * sourceWidth), 0, sourceWidth - 1);
                 int cropY = Math.Clamp((int)Math.Round(Math.Clamp(overlay.SourceCropY, 0, 1) * sourceHeight), 0, sourceHeight - 1);
                 int cropW = Math.Clamp((int)Math.Round(Math.Clamp(overlay.SourceCropWidth, 0, 1) * sourceWidth), 1, sourceWidth - cropX);
@@ -414,11 +424,8 @@ public sealed class VideoCompositor : IDisposable
                 // Older Windows builds or apps that reject Graphics Capture can still use
                 // PrintWindow. Never copy desktop pixels here: that would capture the window
                 // currently covering the source instead of the selected source window.
-                if (windowCapture is not null)
-                    continue;
-
                 nint scratchDc = GetOrCreateOverlayScratch(
-                    overlay.SourceWindowHandle, windowRegion.Width, windowRegion.Height, _memoryDc);
+                    overlay.SourceWindowHandle, windowRegion!.Width, windowRegion.Height, _memoryDc);
                 bool printed = scratchDc != 0 &&
                     PrintWindow(overlay.SourceWindowHandle, scratchDc, PwRenderFullContent);
                 if (printed)
