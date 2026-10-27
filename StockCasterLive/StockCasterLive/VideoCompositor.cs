@@ -186,6 +186,9 @@ public sealed class VideoCompositor : IDisposable
                     var capture = new OverlayWindowCapture(handle);
                     capture.Warning += warning => CompositorWarning?.Invoke(warning);
                     _overlayCaptures.Add(handle, capture);
+                    string title = WindowCaptureService.GetWindowTitle(handle);
+                    CompositorWarning?.Invoke(
+                        $"오버레이 원본 창 캡처 시작: '{title}' HWND=0x{handle.ToInt64():X}");
                 }
                 catch (Exception ex)
                 {

@@ -139,7 +139,7 @@ public static class WindowCaptureService
     private static extern int SetStretchBltMode(nint hdc, int mode);
 
     [DllImport("user32.dll")]
-    private static extern nint WindowFromPoint(NativePoint point);
+    private static extern nint WindowFromPhysicalPoint(NativePoint point);
 
     [DllImport("user32.dll")]
     private static extern nint GetAncestor(nint hWnd, uint flags);
@@ -207,12 +207,13 @@ public static class WindowCaptureService
     /// 핸들을 돌려준다. 오버레이 원본 창을 고를 때 예전에는 "이 사각형을 포함하는 창들
     /// 중 가장 작은 것"을 골랐는데, 화면에 안 보이는(다른 창 뒤에 가려진) 배경/런처
     /// 창이 우연히 더 작은 경우 그게 잘못 뽑힐 수 있었다. OS에 "여기 뭐가 보이니"라고
-    /// 직접 묻는 이 방식이 항상 정확하다. WindowFromPoint는 자식 컨트롤의 핸들을 줄 수
+    /// 직접 묻는 이 방식이 항상 정확하다. 물리 좌표 선택창과 짝을 맞춰
+    /// WindowFromPhysicalPoint를 쓰며, 자식 컨트롤의 핸들을 줄 수
     /// 있으므로 GetAncestor(GA_ROOT)로 그 최상위(top-level) 창까지 올라간다.
     /// </summary>
     public static nint GetTopLevelWindowAt(int x, int y)
     {
-        nint hwnd = WindowFromPoint(new NativePoint { X = x, Y = y });
+        nint hwnd = WindowFromPhysicalPoint(new NativePoint { X = x, Y = y });
         if (hwnd == 0)
             return 0;
 

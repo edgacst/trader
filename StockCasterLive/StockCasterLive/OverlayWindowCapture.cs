@@ -33,6 +33,7 @@ internal sealed class OverlayWindowCapture : IDisposable
     private int _frameProcessing;
     private int _disposed;
     private int _reportedFrameError;
+    private int _reportedFirstFrame;
     private int _poolWidth;
     private int _poolHeight;
 
@@ -153,6 +154,9 @@ internal sealed class OverlayWindowCapture : IDisposable
                 {
                     lock (_frameLock)
                         _latestFrame = copiedFrame;
+
+                    if (Interlocked.Exchange(ref _reportedFirstFrame, 1) == 0)
+                        Warning?.Invoke($"창 캡처 프레임 수신: {copiedFrame.Width}×{copiedFrame.Height}");
                 }
             }
             finally

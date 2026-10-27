@@ -18,7 +18,7 @@ internal static class UpdateService
     private static HttpClient CreateClient(TimeSpan timeout)
     {
         var client = new HttpClient { Timeout = timeout };
-        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("EdgarCasterLiveUpdater", "1.1.5"));
+        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("EdgarCasterLiveUpdater", "1.1.6"));
         client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
         return client;
     }

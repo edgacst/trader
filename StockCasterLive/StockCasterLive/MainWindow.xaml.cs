@@ -741,7 +741,7 @@ public partial class MainWindow : Window
                 cropRegion = selected;
 
                 // 앱을 다시 표시하기 전에 HWND를 확정한다. 창을 앞으로 띄운 뒤
-                // WindowFromPoint를 호출하면 선택한 원본 대신 이 앱 자신이 잡힐 수 있다.
+                // 물리 좌표 기준 HWND 검색으로 선택한 화면의 실제 원본 창을 찾는다.
                 int centerX = selected.X + selected.Width / 2;
                 int centerY = selected.Y + selected.Height / 2;
                 sourceWindowHandle = WindowCaptureService.GetTopLevelWindowAt(centerX, centerY);
