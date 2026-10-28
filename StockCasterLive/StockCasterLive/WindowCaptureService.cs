@@ -221,6 +221,38 @@ public static class WindowCaptureService
         return root != 0 ? root : hwnd;
     }
 
+    /// <summary>Checks whether most sampled points in a source crop are covered by another top-level window.</summary>
+    public static bool IsRegionOccluded(nint sourceWindowHandle, CaptureRegion region)
+    {
+        if (!IsWindowAvailable(sourceWindowHandle) || region.Width <= 0 || region.Height <= 0)
+            return false;
+
+        int left = region.X;
+        int top = region.Y;
+        int right = (int)Math.Min((long)region.X + region.Width - 1, int.MaxValue);
+        int bottom = (int)Math.Min((long)region.Y + region.Height - 1, int.MaxValue);
+        int midX = left + (right - left) / 2;
+        int midY = top + (bottom - top) / 2;
+        var samples = new[]
+        {
+            new NativePoint { X = midX, Y = midY },
+            new NativePoint { X = left + (right - left) / 4, Y = top + (bottom - top) / 4 },
+            new NativePoint { X = left + (right - left) * 3 / 4, Y = top + (bottom - top) / 4 },
+            new NativePoint { X = left + (right - left) / 4, Y = top + (bottom - top) * 3 / 4 },
+            new NativePoint { X = left + (right - left) * 3 / 4, Y = top + (bottom - top) * 3 / 4 }
+        };
+
+        int covered = 0;
+        foreach (NativePoint point in samples)
+        {
+            nint topLevelWindow = GetTopLevelWindowAt(point.X, point.Y);
+            if (topLevelWindow != 0 && topLevelWindow != sourceWindowHandle)
+                covered++;
+        }
+
+        return covered >= 3;
+    }
+
     /// <summary>창 핸들로 제목 텍스트만 조회한다(GetCapturableWindows의 160×100 최소 크기
     /// 필터를 거치지 않은, 더 작은 창에도 쓸 수 있도록 별도로 뺐다).</summary>
     public static string GetWindowTitle(nint handle)

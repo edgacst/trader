@@ -102,6 +102,10 @@ public sealed class VideoCompositor : IDisposable
     private volatile IReadOnlyList<OverlayRegion> _overlays;
     private readonly object _overlayCaptureSync = new();
     private readonly Dictionary<nint, OverlayWindowCapture> _overlayCaptures = new();
+    private readonly Dictionary<OverlayCropKey, OverlayWindowCapture.PixelFrame> _lastGoodOverlayFrames = new();
+    private readonly HashSet<OverlayCropKey> _reportedOccludedOverlays = new();
+    private readonly HashSet<OverlayCropKey> _reportedPrintWindowOverlays = new();
+    private readonly HashSet<OverlayCropKey> _reportedFrozenOverlays = new();
     private readonly int _frameRate;
     private readonly string _pipeName = $"stockcaster_videocomposite_{Guid.NewGuid():N}";
 
@@ -126,9 +130,17 @@ public sealed class VideoCompositor : IDisposable
     {
         public nint Dc;
         public nint DibSection;
+        public nint Bits;
         public int Width;
         public int Height;
     }
+
+    private readonly record struct OverlayCropKey(
+        nint WindowHandle,
+        double X,
+        double Y,
+        double Width,
+        double Height);
 
     public event Action<string>? CompositorWarning;
 
@@ -166,6 +178,23 @@ public sealed class VideoCompositor : IDisposable
                 .Select(overlay => overlay.SourceWindowHandle)
                 .Where(handle => handle != 0)
                 .ToHashSet();
+            var activeCrops = snapshot
+                .Select(overlay => new OverlayCropKey(
+                    overlay.SourceWindowHandle,
+                    overlay.SourceCropX,
+                    overlay.SourceCropY,
+                    overlay.SourceCropWidth,
+                    overlay.SourceCropHeight))
+                .ToHashSet();
+
+            foreach (OverlayCropKey staleKey in _lastGoodOverlayFrames.Keys
+                         .Where(key => !activeCrops.Contains(key)).ToArray())
+            {
+                _lastGoodOverlayFrames.Remove(staleKey);
+                _reportedOccludedOverlays.Remove(staleKey);
+                _reportedPrintWindowOverlays.Remove(staleKey);
+                _reportedFrozenOverlays.Remove(staleKey);
+            }
 
             foreach (nint staleHandle in _overlayCaptures.Keys.Where(handle => !activeHandles.Contains(handle)).ToArray())
             {
@@ -336,9 +365,84 @@ public sealed class VideoCompositor : IDisposable
         }
 
         SelectObject(dc, dib);
-        _overlayScratchBuffers[windowHandle] = new OverlayScratchBuffer { Dc = dc, DibSection = dib, Width = width, Height = height };
+        _overlayScratchBuffers[windowHandle] = new OverlayScratchBuffer
+        {
+            Dc = dc,
+            DibSection = dib,
+            Bits = bits,
+            Width = width,
+            Height = height
+        };
         return dc;
     }
+
+    private static double GetCropDifferenceRatio(
+        byte[] candidate,
+        OverlayWindowCapture.PixelFrame reference,
+        int cropX,
+        int cropY,
+        int cropWidth,
+        int cropHeight)
+    {
+        if (candidate.Length != reference.Bgra.Length)
+            return 1d;
+
+        int sampleColumns = Math.Min(24, cropWidth);
+        int sampleRows = Math.Min(12, cropHeight);
+        int changed = 0;
+        int total = sampleColumns * sampleRows;
+        for (int row = 0; row < sampleRows; row++)
+        {
+            int y = cropY + Math.Min(cropHeight - 1, (row * 2 + 1) * cropHeight / (sampleRows * 2));
+            for (int column = 0; column < sampleColumns; column++)
+            {
+                int x = cropX + Math.Min(cropWidth - 1, (column * 2 + 1) * cropWidth / (sampleColumns * 2));
+                int offset = (y * reference.Width + x) * 4;
+                if (PixelsDiffer(candidate, offset, reference.Bgra, offset))
+                    changed++;
+            }
+        }
+
+        return total == 0 ? 1d : changed / (double)total;
+    }
+
+    private static double GetNativeCropDifferenceRatio(
+        nint candidateBits,
+        int candidateWidth,
+        OverlayWindowCapture.PixelFrame reference,
+        int cropX,
+        int cropY,
+        int cropWidth,
+        int cropHeight)
+    {
+        if (candidateBits == 0 || candidateWidth != reference.Width)
+            return 1d;
+
+        int sampleColumns = Math.Min(24, cropWidth);
+        int sampleRows = Math.Min(12, cropHeight);
+        int changed = 0;
+        int total = sampleColumns * sampleRows;
+        for (int row = 0; row < sampleRows; row++)
+        {
+            int y = cropY + Math.Min(cropHeight - 1, (row * 2 + 1) * cropHeight / (sampleRows * 2));
+            for (int column = 0; column < sampleColumns; column++)
+            {
+                int x = cropX + Math.Min(cropWidth - 1, (column * 2 + 1) * cropWidth / (sampleColumns * 2));
+                int offset = (y * candidateWidth + x) * 4;
+                if (Math.Abs(Marshal.ReadByte(candidateBits, offset) - reference.Bgra[offset]) > 48 ||
+                    Math.Abs(Marshal.ReadByte(candidateBits, offset + 1) - reference.Bgra[offset + 1]) > 48 ||
+                    Math.Abs(Marshal.ReadByte(candidateBits, offset + 2) - reference.Bgra[offset + 2]) > 48)
+                    changed++;
+            }
+        }
+
+        return total == 0 ? 1d : changed / (double)total;
+    }
+
+    private static bool PixelsDiffer(byte[] first, int firstOffset, byte[] second, int secondOffset) =>
+        Math.Abs(first[firstOffset] - second[secondOffset]) > 48 ||
+        Math.Abs(first[firstOffset + 1] - second[secondOffset + 1]) > 48 ||
+        Math.Abs(first[firstOffset + 2] - second[secondOffset + 2]) > 48;
 
     private bool ComposeFrame()
     {
@@ -378,9 +482,12 @@ public sealed class VideoCompositor : IDisposable
                     capturedFrame = windowCapture?.GetLatestFrame();
                 }
 
-                // WGC은 다른 창에 가려져 있거나 화면 밖으로 일부 이동한 원본도
-                // HWND 프레임을 제공한다. 화면 좌표 영역이 있을 때만 이 프레임을
-                // 사용하는 식으로 제한하면 해당 경우 오버레이가 통째로 사라진다.
+                OverlayCropKey cacheKey = new(
+                    overlay.SourceWindowHandle,
+                    overlay.SourceCropX,
+                    overlay.SourceCropY,
+                    overlay.SourceCropWidth,
+                    overlay.SourceCropHeight);
                 CaptureRegion? windowRegion = capturedFrame is null
                     ? WindowCaptureService.GetWindowRegion(overlay.SourceWindowHandle)
                     : null;
@@ -396,10 +503,102 @@ public sealed class VideoCompositor : IDisposable
                 int cropW = Math.Clamp((int)Math.Round(Math.Clamp(overlay.SourceCropWidth, 0, 1) * sourceWidth), 1, sourceWidth - cropX);
                 int cropH = Math.Clamp((int)Math.Round(Math.Clamp(overlay.SourceCropHeight, 0, 1) * sourceHeight), 1, sourceHeight - cropY);
 
+                bool usePrintWindowFrame = false;
+                nint scratchDc = 0;
                 if (capturedFrame is not null)
                 {
-                    // WGC supplies pixels rendered by the source HWND itself, even when another
-                    // window covers it. StretchDIBits reads the latest immutable BGRA snapshot.
+                    CaptureRegion? captureBounds = WindowCaptureService.GetWindowCaptureBounds(
+                        overlay.SourceWindowHandle, sourceWidth, sourceHeight);
+                    if (windowCapture is not null && captureBounds is not null)
+                    {
+                        int screenCropX = captureBounds.X + (int)Math.Round(cropX * captureBounds.Width / (double)sourceWidth);
+                        int screenCropY = captureBounds.Y + (int)Math.Round(cropY * captureBounds.Height / (double)sourceHeight);
+                        int screenCropWidth = Math.Max(1, (int)Math.Round(cropW * captureBounds.Width / (double)sourceWidth));
+                        int screenCropHeight = Math.Max(1, (int)Math.Round(cropH * captureBounds.Height / (double)sourceHeight));
+                        bool occluded = WindowCaptureService.IsRegionOccluded(
+                            overlay.SourceWindowHandle,
+                            new CaptureRegion(screenCropX, screenCropY, screenCropWidth, screenCropHeight));
+
+                        OverlayWindowCapture.PixelFrame? lastGoodFrame;
+                        bool reportOcclusion = false;
+                        lock (_overlayCaptureSync)
+                        {
+                            _lastGoodOverlayFrames.TryGetValue(cacheKey, out lastGoodFrame);
+                            if (lastGoodFrame is not null &&
+                                (lastGoodFrame.Width != sourceWidth || lastGoodFrame.Height != sourceHeight))
+                                lastGoodFrame = null;
+
+                            if (occluded)
+                                reportOcclusion = _reportedOccludedOverlays.Add(cacheKey);
+                            else
+                            {
+                                _lastGoodOverlayFrames[cacheKey] = capturedFrame;
+                                _reportedOccludedOverlays.Remove(cacheKey);
+                                _reportedPrintWindowOverlays.Remove(cacheKey);
+                                _reportedFrozenOverlays.Remove(cacheKey);
+                            }
+                        }
+
+                        if (reportOcclusion)
+                            CompositorWarning?.Invoke($"오버레이 원본 영역 가려짐 감지: '{overlay.SourceWindowTitle}'");
+
+                        if (occluded)
+                        {
+                            double wgcDifference = lastGoodFrame is null
+                                ? 1d
+                                : GetCropDifferenceRatio(capturedFrame.Bgra, lastGoodFrame, cropX, cropY, cropW, cropH);
+
+                            // 일부 증권사 화면은 가려지면 WGC 프레임의 내용이 흰색으로
+                            // 비워진다. 이때 WM_PRINT를 요청해 한 번 더 그리게 한다.
+                            scratchDc = GetOrCreateOverlayScratch(
+                                overlay.SourceWindowHandle, sourceWidth, sourceHeight, _memoryDc);
+                            bool printed = scratchDc != 0 &&
+                                PrintWindow(overlay.SourceWindowHandle, scratchDc, PwRenderFullContent);
+
+                            if (printed && (lastGoodFrame is null ||
+                                GetNativeCropDifferenceRatio(
+                                    _overlayScratchBuffers[overlay.SourceWindowHandle].Bits,
+                                    sourceWidth,
+                                    lastGoodFrame,
+                                    cropX,
+                                    cropY,
+                                    cropW,
+                                    cropH) + 0.05 < wgcDifference))
+                            {
+                                usePrintWindowFrame = true;
+                                bool reportPrintWindow;
+                                lock (_overlayCaptureSync)
+                                    reportPrintWindow = _reportedPrintWindowOverlays.Add(cacheKey);
+                                if (reportPrintWindow)
+                                    CompositorWarning?.Invoke($"가려진 오버레이를 PrintWindow로 다시 그렸습니다: '{overlay.SourceWindowTitle}'");
+                            }
+                            else if (lastGoodFrame is not null && wgcDifference >= 0.55)
+                            {
+                                // 대상 앱이 가려진 프레임을 제공하면 빈 화면 대신
+                                // 마지막으로 정상 수신한 프레임을 유지한다.
+                                capturedFrame = lastGoodFrame;
+                                bool reportFrozen;
+                                lock (_overlayCaptureSync)
+                                    reportFrozen = _reportedFrozenOverlays.Add(cacheKey);
+                                if (reportFrozen)
+                                    CompositorWarning?.Invoke($"가려진 창 프레임이 비어 마지막 정상 화면을 유지합니다: '{overlay.SourceWindowTitle}'");
+                            }
+                            else if (lastGoodFrame is null || wgcDifference < 0.55)
+                            {
+                                lock (_overlayCaptureSync)
+                                    _lastGoodOverlayFrames[cacheKey] = capturedFrame;
+                            }
+                        }
+                    }
+
+                    if (usePrintWindowFrame)
+                    {
+                        StretchBlt(_memoryDc, destX, destY, destW, destH,
+                            scratchDc, cropX, cropY, cropW, cropH, Srccopy);
+                        continue;
+                    }
+
+                    // Use the newest valid HWND frame, including while the source is covered.
                     var info = new BitmapInfoHeader
                     {
                         Size = (uint)Marshal.SizeOf<BitmapInfoHeader>(),
@@ -427,11 +626,11 @@ public sealed class VideoCompositor : IDisposable
                 // Older Windows builds or apps that reject Graphics Capture can still use
                 // PrintWindow. Never copy desktop pixels here: that would capture the window
                 // currently covering the source instead of the selected source window.
-                nint scratchDc = GetOrCreateOverlayScratch(
+                scratchDc = GetOrCreateOverlayScratch(
                     overlay.SourceWindowHandle, windowRegion!.Width, windowRegion.Height, _memoryDc);
-                bool printed = scratchDc != 0 &&
+                bool fallbackPrinted = scratchDc != 0 &&
                     PrintWindow(overlay.SourceWindowHandle, scratchDc, PwRenderFullContent);
-                if (printed)
+                if (fallbackPrinted)
                 {
                     StretchBlt(_memoryDc, destX, destY, destW, destH,
                         scratchDc, cropX, cropY, cropW, cropH, Srccopy);
@@ -463,6 +662,10 @@ public sealed class VideoCompositor : IDisposable
             foreach (OverlayWindowCapture capture in _overlayCaptures.Values)
                 capture.Dispose();
             _overlayCaptures.Clear();
+            _lastGoodOverlayFrames.Clear();
+            _reportedOccludedOverlays.Clear();
+            _reportedPrintWindowOverlays.Clear();
+            _reportedFrozenOverlays.Clear();
         }
 
         foreach (OverlayScratchBuffer scratch in _overlayScratchBuffers.Values)
