@@ -241,21 +241,38 @@ public sealed class FfmpegStreamingService
             : (options.FrameRate == 60 ? 7500 : 5000);
         bool useHardwareEncoder = await IsNvencAvailableAsync();
 
-        // Always resolve a desktop-coordinate capture region, even in "select window"
-        // mode. That mode used to capture via ffmpeg's own `hwnd=` gdigrab source,
-        // which renders the window independently of this app's PrintWindow-based live
-        // preview and is not guaranteed to agree with it on window bounds/content.
-        // Because privacy masks are drawn and normalized against the preview frame,
-        // that mismatch let a mosaic look correctly placed in the operator's preview
-        // while landing on the wrong pixels (or missing entirely) in the actual
-        // broadcast. Capturing the same desktop rectangle for both preview and stream
-        // keeps them pixel-aligned so the mask always covers what it covers on screen.
-        CaptureRegion? effectiveRegion = options.SourceWindow.Region
-            ?? WindowCaptureService.GetWindowRegion(options.SourceWindow.Handle);
+        // When a selected window has a WGC source/crop, use that same window frame for
+        // both preview and the broadcast compositor. A desktop BitBlt here would show
+        // whichever window happens to cover the chart, even though preview follows the
+        // selected HWND.
+        (int Width, int Height)? captureSize = options.SourceWindow.Handle != 0
+            ? OverlayWindowCapture.TryGetCaptureSize(options.SourceWindow.Handle)
+            : null;
+        CaptureRegion? captureBounds = captureSize is { } size
+            ? WindowCaptureService.GetWindowCaptureBounds(options.SourceWindow.Handle, size.Width, size.Height)
+            : null;
+        bool useWindowCapture = options.SourceWindow.Handle != 0 && captureBounds is not null &&
+            (options.SourceWindow.Region is null || options.SourceWindow.CaptureCrop is not null);
+
+        CaptureRegion? effectiveRegion = options.SourceWindow.Region ??
+            (useWindowCapture ? captureBounds : WindowCaptureService.GetWindowRegion(options.SourceWindow.Handle));
         if (effectiveRegion is null)
             throw new InvalidOperationException("선택한 차트 창의 화면 위치를 확인하지 못했습니다. 창을 다시 선택해 주세요.");
-        if (!WindowCaptureService.IsRegionAvailable(effectiveRegion))
+        if (!useWindowCapture && !WindowCaptureService.IsRegionAvailable(effectiveRegion))
             throw new InvalidOperationException("선택한 방송 영역이 현재 모니터 화면을 벗어났습니다. 차트 창을 모니터 안쪽으로 옮기거나 방송 영역을 다시 지정해 주세요.");
+
+        OverlayRegion? mainWindowSource = useWindowCapture
+            ? new OverlayRegion(
+                options.SourceWindow.Handle,
+                string.IsNullOrWhiteSpace(options.SourceWindow.CaptureWindowTitle)
+                    ? options.SourceWindow.Title
+                    : options.SourceWindow.CaptureWindowTitle,
+                options.SourceWindow.CaptureCrop?.X ?? 0,
+                options.SourceWindow.CaptureCrop?.Y ?? 0,
+                options.SourceWindow.CaptureCrop?.Width ?? 1,
+                options.SourceWindow.CaptureCrop?.Height ?? 1,
+                0, 0, 1, 1)
+            : null;
 
         // GPU 데스크톱 복제(ddagrab) 캡처는 항상 GPU→CPU(hwdownload)→GPU(NVENC 업로드) 왕복을
         // 거치는데, 이 하드웨어 조합에서는 그 왕복이 실시간보다 3~5배 느려서(speed=0.2~0.6x)
@@ -299,7 +316,7 @@ public sealed class FfmpegStreamingService
             VideoCompositor? compositor = null;
             try
             {
-                compositor = new VideoCompositor(effectiveRegion, options.OverlayRegions, options.FrameRate);
+                compositor = new VideoCompositor(effectiveRegion, options.OverlayRegions, options.FrameRate, mainWindowSource);
                 compositor.CompositorWarning += warning => AppendLog("INFO", $"[화면합성] {warning}");
                 compositor.Start();
                 _videoCompositor = compositor;
@@ -308,6 +325,10 @@ public sealed class FfmpegStreamingService
             {
                 compositor?.Dispose();
                 _videoCompositor = null;
+                if (mainWindowSource is not null)
+                    throw new InvalidOperationException(
+                        $"선택한 창을 방송 화면으로 캡처하지 못했습니다. 창 캡처 기능을 시작할 수 없습니다: {ex.Message}", ex);
+
                 AppendLog("INFO", $"[화면합성] 오버레이 합성을 시작하지 못해 기존 화면 캡처로 전환합니다: {ex.Message}");
                 useVideoCompositor = false;
             }

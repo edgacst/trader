@@ -16,6 +16,8 @@ public sealed class WindowInfo
     public int Width { get; init; }
     public int Height { get; init; }
     public CaptureRegion? Region { get; init; }
+    public WindowCaptureCrop? CaptureCrop { get; init; }
+    public string CaptureWindowTitle { get; init; } = string.Empty;
     public string DisplayName => Region is not null
         ? $"사용자 지정 영역  ·  {Region.Width} × {Region.Height}"
         : string.IsNullOrWhiteSpace(ProcessName) ? Title : $"{Title}  ·  {ProcessName}";
@@ -264,6 +266,22 @@ public static class WindowCaptureService
         var builder = new StringBuilder(length + 1);
         GetWindowText(handle, builder, builder.Capacity);
         return builder.ToString().Trim();
+    }
+
+    public static string GetWindowProcessName(nint handle)
+    {
+        if (handle == 0)
+            return string.Empty;
+
+        GetWindowThreadProcessId(handle, out uint processId);
+        try
+        {
+            return Process.GetProcessById((int)processId).ProcessName;
+        }
+        catch
+        {
+            return string.Empty;
+        }
     }
 
     public static List<WindowInfo> GetCapturableWindows()

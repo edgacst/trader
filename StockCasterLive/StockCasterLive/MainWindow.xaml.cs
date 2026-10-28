@@ -34,6 +34,8 @@ public partial class MainWindow : Window
     private WindowInfo? _customRegionSource;
     private int _previewPixelWidth;
     private int _previewPixelHeight;
+    private OverlayWindowCapture? _previewWindowCapture;
+    private nint _previewCaptureHandle;
     private Point? _maskDragStart;
     private Rectangle? _draftMaskRectangle;
     private bool _savedRegionUnavailable;
@@ -263,8 +265,25 @@ public partial class MainWindow : Window
         {
             if (WindowCaptureService.IsRegionAvailable(savedRegion))
             {
+                WindowInfo? savedCaptureWindow = null;
+                if (!string.IsNullOrWhiteSpace(_settings.SavedCaptureWindowProcessName) &&
+                    !string.IsNullOrWhiteSpace(_settings.SavedCaptureWindowTitle))
+                {
+                    savedCaptureWindow = WindowCaptureService.GetCapturableWindows().FirstOrDefault(window =>
+                        string.Equals(window.ProcessName, _settings.SavedCaptureWindowProcessName, StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(window.Title, _settings.SavedCaptureWindowTitle, StringComparison.Ordinal));
+                }
+
+                WindowCaptureCrop? savedCrop = savedCaptureWindow is null
+                    ? null
+                    : _settings.SavedCaptureWindowCrop ?? TryCreateWindowCaptureCrop(savedCaptureWindow.Handle, savedRegion);
+                nint sourceHandle = savedCrop is null ? 0 : savedCaptureWindow!.Handle;
                 _customRegionSource = new WindowInfo
                 {
+                    Handle = sourceHandle,
+                    ProcessName = savedCaptureWindow?.ProcessName ?? string.Empty,
+                    CaptureWindowTitle = savedCaptureWindow?.Title ?? string.Empty,
+                    CaptureCrop = savedCrop,
                     Region = savedRegion,
                     Title = "사용자 지정 영역",
                     Width = savedRegion.Width,
@@ -377,7 +396,7 @@ public partial class MainWindow : Window
         if (WindowCombo.SelectedItem is not WindowInfo selectedWindow)
             return;
 
-        if (selectedWindow.Region is null && !WindowCaptureService.IsWindowAvailable(selectedWindow.Handle))
+        if (selectedWindow.Handle != 0 && !WindowCaptureService.IsWindowAvailable(selectedWindow.Handle))
         {
             PreviewInfoText.Text = "선택한 창이 닫혔습니다";
             PreviewImage.Source = null;
@@ -395,9 +414,17 @@ public partial class MainWindow : Window
             // privacy mask look correctly placed here while missing its target in the
             // real broadcast. Matching capture methods keeps preview and stream
             // pixel-aligned, so what's masked here is what's masked live.
+            BitmapSource? frame = null;
+            if (selectedWindow.Handle != 0 &&
+                selectedWindow.Handle == _previewCaptureHandle &&
+                _previewWindowCapture?.GetLatestFrame() is OverlayWindowCapture.PixelFrame windowFrame)
+            {
+                frame = CreateWindowPreviewFrame(windowFrame, selectedWindow.CaptureCrop, 960, 540);
+            }
+
             CaptureRegion? previewRegion = selectedWindow.Region
                 ?? WindowCaptureService.GetWindowRegion(selectedWindow.Handle);
-            BitmapSource? frame = previewRegion is not null
+            frame ??= previewRegion is not null
                 ? WindowCaptureService.CaptureScreenRegion(previewRegion, 960, 540)
                 : null;
             if (frame is null || _closing)
@@ -433,6 +460,7 @@ public partial class MainWindow : Window
     {
         PreviewImage.Source = null;
         PreviewEmptyPanel.Visibility = WindowCombo.SelectedItem is null ? Visibility.Visible : Visibility.Collapsed;
+        UpdatePreviewWindowCapture(WindowCombo.SelectedItem as WindowInfo);
         if (WindowCombo.SelectedItem is WindowInfo window)
         {
             string sourceKey = ComputeSourceKey(window);
@@ -465,6 +493,63 @@ public partial class MainWindow : Window
                     : window.DisplayName,
                 true);
         }
+    }
+
+    private void UpdatePreviewWindowCapture(WindowInfo? window)
+    {
+        nint requestedHandle = window?.Handle ?? 0;
+        if (_previewCaptureHandle == requestedHandle)
+            return;
+
+        _previewWindowCapture?.Dispose();
+        _previewWindowCapture = null;
+        _previewCaptureHandle = requestedHandle;
+        if (requestedHandle == 0 || !OverlayWindowCapture.IsSupported)
+            return;
+
+        try
+        {
+            _previewWindowCapture = new OverlayWindowCapture(requestedHandle);
+        }
+        catch
+        {
+            _previewWindowCapture = null;
+            _previewCaptureHandle = 0;
+        }
+    }
+
+    private static BitmapSource CreateWindowPreviewFrame(
+        OverlayWindowCapture.PixelFrame frame,
+        WindowCaptureCrop? crop,
+        int maxWidth,
+        int maxHeight)
+    {
+        BitmapSource fullFrame = BitmapSource.Create(
+            frame.Width,
+            frame.Height,
+            96,
+            96,
+            PixelFormats.Bgra32,
+            null,
+            frame.Bgra,
+            frame.Width * 4);
+        fullFrame.Freeze();
+
+        WindowCaptureCrop normalizedCrop = crop ?? new WindowCaptureCrop(0, 0, 1, 1);
+        int x = Math.Clamp((int)Math.Floor(normalizedCrop.X * frame.Width), 0, frame.Width - 1);
+        int y = Math.Clamp((int)Math.Floor(normalizedCrop.Y * frame.Height), 0, frame.Height - 1);
+        int width = Math.Clamp((int)Math.Ceiling(normalizedCrop.Width * frame.Width), 1, frame.Width - x);
+        int height = Math.Clamp((int)Math.Ceiling(normalizedCrop.Height * frame.Height), 1, frame.Height - y);
+        BitmapSource cropped = new CroppedBitmap(fullFrame, new Int32Rect(x, y, width, height));
+        cropped.Freeze();
+
+        if (cropped.PixelWidth <= maxWidth && cropped.PixelHeight <= maxHeight)
+            return cropped;
+
+        double scale = Math.Min(maxWidth / (double)cropped.PixelWidth, maxHeight / (double)cropped.PixelHeight);
+        var scaled = new TransformedBitmap(cropped, new ScaleTransform(scale, scale));
+        scaled.Freeze();
+        return scaled;
     }
 
     // 창 핸들은 앱을 재시작하면 바뀔 수 있으므로 저장/복원용 키로 쓰지 않는다.
@@ -701,8 +786,19 @@ public partial class MainWindow : Window
             var selector = new RegionSelectionWindow();
             if (selector.ShowDialog() == true && selector.SelectedRegion is CaptureRegion region)
             {
+                nint sourceWindowHandle = WindowCaptureService.GetTopLevelWindowAt(
+                    region.X + region.Width / 2,
+                    region.Y + region.Height / 2);
+                WindowCaptureCrop? sourceCrop = TryCreateWindowCaptureCrop(sourceWindowHandle, region);
+                if (sourceCrop is null)
+                    sourceWindowHandle = 0;
+
                 _customRegionSource = new WindowInfo
                 {
+                    Handle = sourceWindowHandle,
+                    ProcessName = WindowCaptureService.GetWindowProcessName(sourceWindowHandle),
+                    CaptureWindowTitle = WindowCaptureService.GetWindowTitle(sourceWindowHandle),
+                    CaptureCrop = sourceCrop,
                     Region = region,
                     Title = "사용자 지정 영역",
                     Width = region.Width,
@@ -712,7 +808,9 @@ public partial class MainWindow : Window
                 WindowCombo.SelectedItem = _customRegionSource;
                 PersistCaptureLayout();
                 SetStatus("사용자 지정 방송 영역을 선택하고 자동 저장했습니다",
-                    $"위치 {region.X}, {region.Y}  ·  크기 {region.Width} × {region.Height}", true);
+                    sourceWindowHandle != 0
+                        ? $"창 캡처에 연결됨  ·  크기 {region.Width} × {region.Height}  ·  창을 가려도 캡처합니다."
+                        : $"위치 {region.X}, {region.Y}  ·  크기 {region.Width} × {region.Height}", true);
             }
         }
         finally
@@ -721,6 +819,25 @@ public partial class MainWindow : Window
             Activate();
             _previewTimer.Start();
         }
+    }
+
+    private static WindowCaptureCrop? TryCreateWindowCaptureCrop(nint windowHandle, CaptureRegion selection)
+    {
+        if (windowHandle == 0 || OverlayWindowCapture.TryGetCaptureSize(windowHandle) is not { } captureSize)
+            return null;
+
+        CaptureRegion? bounds = WindowCaptureService.GetWindowCaptureBounds(
+            windowHandle, captureSize.Width, captureSize.Height);
+        if (bounds is null || selection.X < bounds.X || selection.Y < bounds.Y ||
+            (long)selection.X + selection.Width > (long)bounds.X + bounds.Width ||
+            (long)selection.Y + selection.Height > (long)bounds.Y + bounds.Height)
+            return null;
+
+        return new WindowCaptureCrop(
+            (selection.X - bounds.X) / (double)bounds.Width,
+            (selection.Y - bounds.Y) / (double)bounds.Height,
+            selection.Width / (double)bounds.Width,
+            selection.Height / (double)bounds.Height);
     }
 
     private void AddOverlayButton_Click(object sender, RoutedEventArgs e)
@@ -1178,7 +1295,22 @@ public partial class MainWindow : Window
         // 이전에 저장해 둔 지정 영역 좌표(SavedCaptureRegion)를 null로 덮어써
         // 사라지게 만들지 않기 위함이다.
         if (window.Region is CaptureRegion region)
+        {
             _settings.SavedCaptureRegion = region;
+
+            if (window.Handle != 0 && window.CaptureCrop is not null)
+            {
+                _settings.SavedCaptureWindowProcessName = window.ProcessName;
+                _settings.SavedCaptureWindowTitle = window.CaptureWindowTitle;
+                _settings.SavedCaptureWindowCrop = window.CaptureCrop;
+            }
+            else
+            {
+                _settings.SavedCaptureWindowProcessName = string.Empty;
+                _settings.SavedCaptureWindowTitle = string.Empty;
+                _settings.SavedCaptureWindowCrop = null;
+            }
+        }
 
         _settings.SavedMaskSourceKey = ComputeSourceKey(window);
         _settings.SavedPrivacyMasks = _privacyMasks.Where(IsValidPrivacyMask).ToList();
@@ -1436,6 +1568,8 @@ public partial class MainWindow : Window
             _previewTimer.Stop();
             _elapsedTimer.Stop();
             _levelMeterTimer.Stop();
+            _previewWindowCapture?.Dispose();
+            _previewWindowCapture = null;
             _levelMeter.Dispose();
             await _streamer.StopAsync();
             Close();
@@ -1445,6 +1579,8 @@ public partial class MainWindow : Window
         _previewTimer.Stop();
         _elapsedTimer.Stop();
         _levelMeterTimer.Stop();
+        _previewWindowCapture?.Dispose();
+        _previewWindowCapture = null;
         _levelMeter.Dispose();
     }
 }

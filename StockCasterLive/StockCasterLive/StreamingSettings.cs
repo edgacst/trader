@@ -22,6 +22,9 @@ public sealed class StreamingSettings
     public bool EnableLocalRecording { get; set; }
     public string RecordingFolderPath { get; set; } = string.Empty;
     public CaptureRegion? SavedCaptureRegion { get; set; }
+    public string SavedCaptureWindowProcessName { get; set; } = string.Empty;
+    public string SavedCaptureWindowTitle { get; set; } = string.Empty;
+    public WindowCaptureCrop? SavedCaptureWindowCrop { get; set; }
     public List<PrivacyMask> SavedPrivacyMasks { get; set; } = new();
     // 모자이크가 저장된 방송 화면(지정 영역 또는 특정 창)을 식별하는 키.
     // 창 선택 모드에서는 창 핸들이 재실행할 때마다 바뀌므로 프로세스명+제목으로 식별해

@@ -93,6 +93,7 @@ public sealed class VideoCompositor : IDisposable
     private const int HalftoneStretchMode = 4;
 
     private readonly CaptureRegion _mainRegion;
+    private readonly OverlayRegion? _mainWindowSource;
     // readonly가 아니다 — 방송 중에 오버레이를 추가/삭제/드래그로 옮기거나 크기를
     // 바꿔도 그게 실제 송출 화면에 반영되게 하려면, 이미 시작된 합성기가 들고 있는
     // 목록 자체를 바꿀 수 있어야 한다. UpdateOverlays()로 참조를 통째로 교체하는
@@ -144,11 +145,28 @@ public sealed class VideoCompositor : IDisposable
 
     public event Action<string>? CompositorWarning;
 
-    public VideoCompositor(CaptureRegion mainRegion, IReadOnlyList<OverlayRegion> overlays, int frameRate)
+    public VideoCompositor(
+        CaptureRegion mainRegion,
+        IReadOnlyList<OverlayRegion> overlays,
+        int frameRate,
+        OverlayRegion? mainWindowSource = null)
     {
         _mainRegion = mainRegion;
-        _overlays = overlays;
+        _mainWindowSource = mainWindowSource;
+        _overlays = overlays.ToArray();
         _frameRate = frameRate;
+    }
+
+    private IReadOnlyList<OverlayRegion> ComposeCaptureSources(IReadOnlyList<OverlayRegion> overlays)
+    {
+        if (_mainWindowSource is null)
+            return overlays.ToArray();
+
+        var combined = new OverlayRegion[overlays.Count + 1];
+        combined[0] = _mainWindowSource;
+        for (int index = 0; index < overlays.Count; index++)
+            combined[index + 1] = overlays[index];
+        return combined;
     }
 
     public int Width => _mainRegion.Width;
@@ -167,7 +185,7 @@ public sealed class VideoCompositor : IDisposable
 
     private void SyncOverlayCaptureSessions(IReadOnlyList<OverlayRegion> overlays)
     {
-        OverlayRegion[] snapshot = overlays.ToArray();
+        OverlayRegion[] snapshot = ComposeCaptureSources(overlays).ToArray();
         _overlays = snapshot;
         if (_disposed)
             return;
@@ -217,7 +235,7 @@ public sealed class VideoCompositor : IDisposable
                     _overlayCaptures.Add(handle, capture);
                     string title = WindowCaptureService.GetWindowTitle(handle);
                     CompositorWarning?.Invoke(
-                        $"오버레이 원본 창 캡처 시작: '{title}' HWND=0x{handle.ToInt64():X}");
+                        $"원본 창 캡처 시작: '{title}' HWND=0x{handle.ToInt64():X}");
                 }
                 catch (Exception ex)
                 {
@@ -256,6 +274,7 @@ public sealed class VideoCompositor : IDisposable
                 throw new InvalidOperationException("합성용 화면 버퍼를 만들지 못했습니다.");
 
             SelectObject(_memoryDc, _dibSection);
+            Marshal.Copy(new byte[checked(Width * Height * 4)], 0, _dibBits, checked(Width * Height * 4));
         }
         finally
         {
@@ -446,14 +465,18 @@ public sealed class VideoCompositor : IDisposable
 
     private bool ComposeFrame()
     {
-        nint screenDc = GetDC(0);
-        if (screenDc == 0)
+        // A window-backed main source must never seed the output with desktop pixels:
+        // until its first WGC/PrintWindow frame arrives, keep the last frame (black at
+        // startup) instead of briefly broadcasting whichever window covers it.
+        nint screenDc = _mainWindowSource is null ? GetDC(0) : 0;
+        if (_mainWindowSource is null && screenDc == 0)
             return false;
 
         try
         {
             // 1) 메인 영역을 캔버스 전체에 그대로(1:1) 그린다.
-            if (!BitBlt(_memoryDc, 0, 0, Width, Height,
+            if (_mainWindowSource is null &&
+                !BitBlt(_memoryDc, 0, 0, Width, Height,
                     screenDc, _mainRegion.X, _mainRegion.Y, Srccopy | CaptureBlt))
                 return false;
 
@@ -493,9 +516,6 @@ public sealed class VideoCompositor : IDisposable
                     : null;
                 if (capturedFrame is null && windowRegion is null)
                     continue;
-                if (capturedFrame is null && windowCapture is not null)
-                    continue;
-
                 int sourceWidth = capturedFrame is not null ? capturedFrame.Width : windowRegion!.Width;
                 int sourceHeight = capturedFrame is not null ? capturedFrame.Height : windowRegion!.Height;
                 int cropX = Math.Clamp((int)Math.Round(Math.Clamp(overlay.SourceCropX, 0, 1) * sourceWidth), 0, sourceWidth - 1);
@@ -641,7 +661,8 @@ public sealed class VideoCompositor : IDisposable
         }
         finally
         {
-            ReleaseDC(0, screenDc);
+            if (screenDc != 0)
+                ReleaseDC(0, screenDc);
         }
     }
 
